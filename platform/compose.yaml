@@ -1,0 +1,6 @@
+# Platform end-to-end Data Engineering (contoh proyek UTS). Lihat KONTRAK-DATA.md.
+# Berkas ops (penulis A) dan data (penulis B) digabung dengan include agar dapat dikerjakan terpisah.
+name: de-platform
+include:
+  - compose.ops.yaml
+  - compose.data.yaml
