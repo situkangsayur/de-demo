@@ -84,6 +84,18 @@ Debezium (database `bank` dan `orders`), user replikasi atau hak `REPLICATION` u
   transaksi (GET `?limit=&since=`, POST setor/tarik), transfer, akad (+ `/{id}/{setujui|tolak|cairkan|angsuran}`),
   ringkasan. Rincian di README bab05.
 
+### Perbaikan 23 Nov (sister-hpc-demo, uji bab05 83/83)
+
+- `REPLICA IDENTITY FULL` pada `nasabah`, `rekening`, `akad_pembiayaan`, dan `orders`: envelope CDC update kini
+  membawa `before` (berlaku setelah service bank/order dijalankan ulang).
+- `occurred_at` opsional (RFC3339; kosong = sekarang; > 5 menit masa depan = 400) pada `POST /api/bank/nasabah`
+  (→ `created_at`/`updated_at`), `PATCH` nasabah (→ `updated_at`), `POST /api/bank/rekening` (→ `dibuka_at`),
+  `POST /api/bank/akad` dan aksi akad (→ `diajukan_at`/`updated_at`), serta `POST /api/orders` (→ `orders.created_at`,
+  `occurred_at` event `shop.order.created`; transaksi `bayar_belanja` ikut tanggal checkout).
+- `rekening.updated_at` tetap waktu proses; partisi CDC rekening pakai `dibuka_at`.
+- API tidak memeriksa urutan waktu antarentitas: generator backfill harus mengirim waktu berurutan (nasabah →
+  rekening → transaksi/akad → perubahan profil).
+
 ## Ingestion DE (penulis A)
 
 - **Debezium Server** (`quay.io/debezium/server:3.6.3.Final`, sink `nats-jetstream`), dua instance: database
