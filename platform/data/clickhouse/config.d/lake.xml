@@ -1,0 +1,20 @@
+<!-- Named collection ke bucket lake di RustFS. Kredensial dibaca dari environment container,
+     tidak pernah ditulis di repo. Dipakai jalur ELT: s3(lake_s3, filename='bronze/...', format='Parquet'). -->
+<clickhouse>
+    <named_collections>
+        <lake_s3>
+            <url from_env="CH_LAKE_URL"/>
+            <access_key_id from_env="S3_ACCESS_KEY"/>
+            <secret_access_key from_env="S3_SECRET_KEY"/>
+        </lake_s3>
+    </named_collections>
+    <logger>
+        <level>warning</level>
+        <console>1</console>
+        <formatting><type>json</type></formatting>
+    </logger>
+    <timezone>UTC</timezone>
+    <!-- hemat memori dan disk untuk lab -->
+    <mark_cache_size>268435456</mark_cache_size>
+    <query_log replace="1"><database>system</database><table>query_log</table><ttl>event_date + INTERVAL 3 DAY</ttl><flush_interval_milliseconds>7500</flush_interval_milliseconds></query_log>
+</clickhouse>

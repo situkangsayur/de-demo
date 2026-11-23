@@ -1,0 +1,11 @@
+version: 2
+sources:
+  - name: raw
+    schema: raw
+    description: "Bronze yang dimuat mentah oleh pipeline/elt_raw.py (semua kolom data Nullable(String))."
+    tables:
+      - name: transaksi
+      - name: nasabah
+      - name: rekening
+      - name: akad_pembiayaan
+      - name: cabang

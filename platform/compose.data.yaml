@@ -1,0 +1,201 @@
+# Bagian data platform (penulis B): Airflow, katalog Iceberg (SQL catalog di PostgreSQL), ClickHouse,
+# dbt (di dalam image Airflow), lake-engine (DuckDB atas Iceberg), dan dashboard (Go + Next.js).
+# Dipakai lewat compose.yaml (include) bersama compose.ops.yaml. RustFS dan bucket `lake` milik ops.
+# Lihat README-DATA.md dan KONTRAK-DATA.md.
+
+x-data-env: &data-env
+  TZ: UTC
+  S3_ENDPOINT: ${S3_ENDPOINT:-http://rustfs:9000}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:?isi S3_ACCESS_KEY di .env}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:?isi S3_SECRET_KEY di .env}
+  S3_BUCKET: ${S3_BUCKET:-lake}
+  ICEBERG_CATALOG_URI: postgresql+psycopg2://data:${DATA_PG_PASSWORD:?isi DATA_PG_PASSWORD di .env}@data-pg:5432/iceberg
+  CLICKHOUSE_HOST: clickhouse
+  CLICKHOUSE_PORT: "8123"
+  CLICKHOUSE_USER: ${CLICKHOUSE_USER:-de}
+  CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?isi CLICKHOUSE_PASSWORD di .env}
+  TOKEN_PEPPER: ${TOKEN_PEPPER:?isi TOKEN_PEPPER di .env}
+  DQ_LATENSI_MAKS_MENIT: ${DQ_LATENSI_MAKS_MENIT:-60}
+  AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+  AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Jakarta
+  AIRFLOW__CORE__PARALLELISM: "8"
+  AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "6"
+  AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+  AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${AIRFLOW_ADMIN_USER:-admin}:admin
+  AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/sandi/simple_auth_manager_passwords.json
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://data:${DATA_PG_PASSWORD}@data-pg:5432/airflow
+  AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?isi AIRFLOW_JWT_SECRET di .env}
+  AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:?isi AIRFLOW_API_SECRET_KEY di .env}
+  AIRFLOW__API__BASE_URL: http://${BIND_ADDR:-127.0.0.1}:52010
+  AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "30"
+  AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+  AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:-admin}
+  AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?isi AIRFLOW_ADMIN_PASSWORD di .env}
+
+x-data-image: &data-image
+  image: de-platform-data:1.0
+  build:
+    context: ./data
+    dockerfile: airflow/Dockerfile
+  entrypoint: ["/usr/bin/dumb-init", "--", "/opt/data/mulai.sh"]
+  environment: *data-env
+  volumes:
+    - data_airflow_logs:/opt/airflow/logs
+
+services:
+  data-pg:                       # metadata Airflow (db airflow) + katalog Iceberg (db iceberg)
+    image: postgres:16.4-alpine
+    mem_limit: 400m
+    environment:
+      POSTGRES_USER: data
+      POSTGRES_PASSWORD: ${DATA_PG_PASSWORD}
+      POSTGRES_DB: airflow
+    volumes:
+      - data_pg:/var/lib/postgresql/data
+      - ./data/postgres/01-iceberg.sql:/docker-entrypoint-initdb.d/01-iceberg.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U data -d airflow"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  clickhouse:                    # data warehouse (jalur ELT) + meta (hasil DQ, cost)
+    image: clickhouse/clickhouse-server:24.8.14.39
+    mem_limit: 2g
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-de}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      CH_LAKE_URL: ${S3_ENDPOINT:-http://rustfs:9000}/${S3_BUCKET:-lake}/
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:52011:8123"
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+    volumes:
+      - data_clickhouse:/var/lib/clickhouse
+      - ./data/clickhouse/config.d/lake.xml:/etc/clickhouse-server/config.d/lake.xml:ro
+      - ./data/clickhouse/users.d/de.xml:/etc/clickhouse-server/users.d/de.xml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+  airflow-init:
+    <<: *data-image
+    command: ["init"]
+    mem_limit: 1g
+    restart: "no"
+    depends_on:
+      data-pg: {condition: service_healthy}
+
+  airflow-apiserver:
+    <<: *data-image
+    command: ["apiserver"]
+    mem_limit: 1500m
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:52010:8080"
+    depends_on:
+      airflow-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/api/v2/monitor/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  airflow-scheduler:             # LocalExecutor: task berjalan di container ini
+    <<: *data-image
+    command: ["scheduler"]
+    mem_limit: 4g
+    depends_on:
+      airflow-init: {condition: service_completed_successfully}
+      data-init: {condition: service_completed_successfully}
+
+  airflow-dag-processor:
+    <<: *data-image
+    command: ["dag-processor"]
+    mem_limit: 1g
+    depends_on:
+      airflow-init: {condition: service_completed_successfully}
+
+  data-init:                     # namespace Iceberg, database ClickHouse, lifecycle rule, tabel cost
+    <<: *data-image
+    command: ["data-init"]
+    mem_limit: 1g
+    restart: "no"
+    environment:
+      <<: *data-env
+      SERVICE_NAME: data-init
+    depends_on:
+      data-pg: {condition: service_healthy}
+      clickhouse: {condition: service_healthy}
+
+  muat-awal:                     # sekali jalan: picu run muat awal (penuh) lalu aktifkan jadwal harian
+    <<: *data-image
+    command: ["muat-awal"]
+    mem_limit: 512m
+    restart: "no"
+    environment:
+      <<: *data-env
+      MUAT_AWAL: ${MUAT_AWAL:-1}
+    depends_on:
+      airflow-apiserver: {condition: service_healthy}
+      airflow-scheduler: {condition: service_started}
+
+  lake-engine:                   # DuckDB atas Iceberg gold, dipanggil API dashboard
+    <<: *data-image
+    command: ["lake-engine"]
+    mem_limit: 1500m
+    environment:
+      <<: *data-env
+      SERVICE_NAME: lake-engine
+    depends_on:
+      data-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8090/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  dash-api:
+    image: de-platform-dash-api:1.0
+    build: ./data/dashboard/api
+    mem_limit: 256m
+    environment:
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-de}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      LAKE_ENGINE_URL: http://lake-engine:8090
+      AIRFLOW_URL: http://airflow-apiserver:8080
+      AIRFLOW_USER: ${AIRFLOW_ADMIN_USER:-admin}
+      AIRFLOW_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:52013:8080"
+    depends_on:
+      lake-engine: {condition: service_healthy}
+      clickhouse: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  dash-ui:
+    image: de-platform-dash-ui:1.0
+    build: ./data/dashboard/ui
+    mem_limit: 384m
+    environment:
+      API_URL: http://dash-api:8080
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:52012:3000"
+    depends_on:
+      dash-api: {condition: service_healthy}
+
+volumes:                         # prefiks data_ agar tidak bentrok dengan volume ops_ dan Sister
+  data_pg:
+  data_clickhouse:
+  data_airflow_logs:

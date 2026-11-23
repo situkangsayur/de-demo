@@ -1,0 +1,6 @@
+kanal_key,nama_kanal,jenis_kanal
+atm,ATM,fisik
+ecommerce,Pembayaran toko daring,digital
+mobile,Mobile banking,digital
+teller,Teller cabang,fisik
+web,Internet banking,digital

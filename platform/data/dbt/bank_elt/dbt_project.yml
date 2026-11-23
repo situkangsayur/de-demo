@@ -1,0 +1,38 @@
+# Jalur ELT: transformasi di dalam warehouse ClickHouse.
+# raw (dimuat mentah oleh pipeline/elt_raw.py) -> stg (view, dedup + tipe + tokenization) -> gold (star schema)
+name: bank_elt
+version: "1.0.0"
+config-version: 2
+profile: bank_elt
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  awal_tanggal: "2025-01-01"
+  hari_dim_tanggal: 1095          # 2025-01-01 s.d. 2027-12-31, sama dengan jalur ETL
+  nominal_maks: 5000000000
+  latensi_maks_menit: 60
+  karantina_maks_persen: 10
+
+models:
+  bank_elt:
+    staging:
+      +schema: stg
+      +materialized: view
+    gold:
+      +schema: gold
+      +materialized: table
+      +settings: {allow_nullable_key: 1}
+
+seeds:
+  bank_elt:
+    +schema: gold
+
+data_tests:
+  bank_elt:
+    +store_failures: false

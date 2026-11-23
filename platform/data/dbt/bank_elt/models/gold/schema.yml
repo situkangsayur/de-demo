@@ -1,0 +1,34 @@
+version: 2
+models:
+  - name: fakta_transaksi
+    description: "Grain: satu transaksi."
+    columns:
+      - name: trx_id
+        data_tests: [{unique: {config: {meta: {dimensi: uniqueness}}}}]
+      - name: nasabah_sk
+        data_tests:
+          - not_null: {config: {meta: {dimensi: consistency}}}
+          - relationships:
+              arguments: {to: "ref('dim_nasabah')", field: nasabah_sk}
+              config: {meta: {dimensi: consistency}}
+      - name: cabang_key
+        data_tests:
+          - relationships:
+              arguments: {to: "ref('dim_cabang')", field: cabang_key}
+              config: {meta: {dimensi: consistency}}
+  - name: fakta_pembiayaan
+    columns:
+      - name: akad_key
+        data_tests:
+          - accepted_values:
+              arguments: {values: ["IJR", "MDH", "MRB", "MSY"]}
+              config: {meta: {dimensi: validity}}
+  - name: dim_nasabah
+    columns:
+      - name: nasabah_sk
+        data_tests: [{unique: {config: {meta: {dimensi: uniqueness}}}}]
+  - name: fitur_nasabah
+    description: "Untuk tim AI. Grain: satu nasabah per tgl_fitur, point-in-time."
+    columns:
+      - name: nasabah_sk_saat_itu
+        data_tests: [{not_null: {config: {meta: {dimensi: consistency}}}}]

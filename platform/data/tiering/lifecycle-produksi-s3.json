@@ -1,0 +1,47 @@
+{
+  "Rules": [
+    {
+      "ID": "bronze-warm-cold-archive",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "bronze/"
+      },
+      "Transitions": [
+        {
+          "Days": 395,
+          "StorageClass": "GLACIER_IR"
+        },
+        {
+          "Days": 730,
+          "StorageClass": "GLACIER"
+        }
+      ],
+      "Expiration": {
+        "Days": 3650
+      }
+    },
+    {
+      "ID": "silver-warm-cold",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "silver/"
+      },
+      "Transitions": [
+        {
+          "Days": 395,
+          "StorageClass": "GLACIER_IR"
+        }
+      ]
+    },
+    {
+      "ID": "multipart-tak-selesai-7-hari",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": ""
+      },
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 7
+      }
+    }
+  ]
+}

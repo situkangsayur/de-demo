@@ -1,0 +1,46 @@
+{
+  "Rules": [
+    {
+      "ID": "bronze-warm-ke-cold-13-bulan",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "bronze/"
+      },
+      "Transitions": [
+        {
+          "Days": 395,
+          "StorageClass": "COLD"
+        }
+      ]
+    },
+    {
+      "ID": "bronze-cold-ke-archive-24-bulan-hapus-10-tahun",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "bronze/"
+      },
+      "Transitions": [
+        {
+          "Days": 730,
+          "StorageClass": "ARCHIVE"
+        }
+      ],
+      "Expiration": {
+        "Days": 3650
+      }
+    },
+    {
+      "ID": "silver-warm-ke-cold-13-bulan",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "silver/"
+      },
+      "Transitions": [
+        {
+          "Days": 395,
+          "StorageClass": "COLD"
+        }
+      ]
+    }
+  ]
+}

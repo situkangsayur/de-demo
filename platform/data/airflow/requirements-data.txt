@@ -1,0 +1,10 @@
+# Virtualenv data (/opt/venv-data), terpisah dari Airflow agar dependensi tidak bentrok.
+# Versi diuji 23 Nov 2026 di atas apache/airflow:slim-3.3.2-python3.12.
+dbt-core==1.12.7
+dbt-clickhouse==1.10.3
+clickhouse-connect==1.13.0
+polars==2.0.0
+duckdb==2.0.0
+pyarrow==26.0.0
+pyiceberg[sql-postgres,pyarrow]==0.12.0
+boto3==1.44.9

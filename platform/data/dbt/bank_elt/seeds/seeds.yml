@@ -1,0 +1,8 @@
+version: 2
+seeds:
+  - name: dim_kanal
+    config:
+      column_types: {kanal_key: String, nama_kanal: String, jenis_kanal: String}
+  - name: dim_akad
+    config:
+      column_types: {akad_key: String, nama_akad: String, jenis_akad: String}

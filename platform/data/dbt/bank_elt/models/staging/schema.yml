@@ -1,0 +1,40 @@
+version: 2
+# Test di staging adalah GERBANG: dbt build menjalankan test setelah model staging dibuat;
+# bila ada yang gagal, semua model gold turunannya di-SKIP sehingga gold tidak berubah (W8).
+models:
+  - name: stg_transaksi
+    description: "Transaksi bersih, satu baris per trx_id (app vs cdc sudah didedup)."
+    columns:
+      - name: trx_id
+        data_tests:
+          - not_null: {config: {meta: {dimensi: completeness}}}
+          - unique: {config: {meta: {dimensi: uniqueness}}}
+      - name: rekening_id
+        data_tests: [{not_null: {config: {meta: {dimensi: completeness}}}}]
+      - name: cabang_id
+        data_tests:
+          - not_null: {config: {meta: {dimensi: completeness}}}
+          - relationships:
+              arguments: {to: "ref('stg_cabang')", field: cabang_id}
+              config: {meta: {dimensi: consistency}}
+      - name: waktu
+        data_tests: [{not_null: {config: {meta: {dimensi: completeness}}}}]
+      - name: nominal
+        data_tests:
+          - not_null: {config: {meta: {dimensi: completeness}}}
+          - rentang_nilai:
+              arguments: {lebih_dari: 0, paling_besar: "{{ var('nominal_maks') }}"}
+              config: {meta: {dimensi: validity}}
+      - name: kanal
+        data_tests:
+          - accepted_values:
+              arguments: {values: ["atm", "ecommerce", "mobile", "teller", "web"]}
+              config: {meta: {dimensi: validity}}
+  - name: stg_akad
+    columns:
+      - name: akad_id
+        data_tests: [{unique: {config: {meta: {dimensi: uniqueness}}}}]
+  - name: stg_nasabah_versi
+    columns:
+      - name: nasabah_id
+        data_tests: [{not_null: {config: {meta: {dimensi: completeness}}}}]
