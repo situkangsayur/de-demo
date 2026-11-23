@@ -134,6 +134,13 @@ Debezium (database `bank` dan `orders`), user replikasi atau hak `REPLICATION` u
   training (tanpa data dari masa depan).
 - Dashboard bisnis menjawab empat pertanyaan direksi (slide P08) dari lake dan dari warehouse.
 
+## Keputusan pengampu 23 Nov 2026
+
+- Kolom wajib kosong: tetap ketat (gerbang DQ gagal, gold tidak diterbitkan).
+- Kode akad peka huruf: `mrb`, `Murabahah` dan sejenisnya tidak valid, masuk karantina. Alias nama
+  lengkap huruf besar (`MURABAHAH`) tetap dipetakan.
+- Retensi archive bronze 10 tahun (UU 8/1997).
+
 ## Port
 
 | Port | Service | Pemilik |

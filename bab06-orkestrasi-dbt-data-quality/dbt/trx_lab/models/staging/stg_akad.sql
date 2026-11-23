@@ -1,13 +1,13 @@
--- Silver akad pembiayaan tanggal var('tgl'). Kode akad distandardkan; kode tidak dikenal dibiarkan apa adanya
+-- Silver akad pembiayaan tanggal var('tgl'). Kode akad distandardkan (peka huruf: 'mrb' tidak valid); kode tidak dikenal dibiarkan apa adanya
 -- agar tertangkap uji validity.
 select
     id                                                         as akad_id,
     nasabah_id,
-    multiIf(upper(trim(kode_akad)) in ('MRB', 'MURABAHAH'), 'MRB',
-            upper(trim(kode_akad)) in ('MSY', 'MUSYARAKAH'), 'MSY',
-            upper(trim(kode_akad)) in ('MDH', 'MUDHARABAH'), 'MDH',
-            upper(trim(kode_akad)) in ('IJR', 'IJARAH'), 'IJR',
-            upper(trim(kode_akad)))                            as kode_akad,
+    multiIf(trim(kode_akad) in ('MRB', 'MURABAHAH'), 'MRB',
+            trim(kode_akad) in ('MSY', 'MUSYARAKAH'), 'MSY',
+            trim(kode_akad) in ('MDH', 'MUDHARABAH'), 'MDH',
+            trim(kode_akad) in ('IJR', 'IJARAH'), 'IJR',
+            trim(kode_akad))                            as kode_akad,
     toInt64OrNull(pokok)                                       as pokok,
     toInt64OrNull(margin)                                      as margin,
     toUInt16OrNull(tenor_bulan)                                as tenor_bulan,

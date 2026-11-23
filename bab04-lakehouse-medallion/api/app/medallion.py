@@ -198,7 +198,7 @@ def silver_dimensi() -> dict:
 
     akd = terakhir(bronze.baca("akad_pembiayaan"))
     akd = akd.with_columns(pl.col("kode_akad").alias("kode_akad_asli"),
-                           pl.col("kode_akad").str.strip_chars().str.to_uppercase()
+                           pl.col("kode_akad").str.strip_chars()
                            .replace_strict(AKAD, default=None).alias("kode_akad"))
     valid = akd.filter(pl.col("kode_akad").is_not_null()).select(
         pl.col("id").alias("akad_id"), "nasabah_id", "kode_akad", "kode_akad_asli",

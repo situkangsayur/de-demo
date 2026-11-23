@@ -11,7 +11,7 @@ Sengaja meniru kerumitan sumber nyata agar silver benar-benar bekerja:
 - duplikat bisnis (request dikirim ulang tanpa idempotency key) dan occurred_at mundur (data terlambat);
 - akad melalui status diajukan -> disetujui -> cair (cair_at), sebagian ditolak;
 - kode kanal tidak seragam ('ATM', 'Mobile Banking', 'm-banking', 'teller ', 'WEB');
-- ±3% kode akad tidak valid (dikarantina) dan alias akad ('murabahah');
+- ±3% kode akad tidak valid (dikarantina) dan alias akad ('MURABAHAH'; huruf kecil seperti 'mrb' tidak valid);
 - profil nasabah berubah (kota/segmen/no HP/email) -> bahan SCD-2;
 - nasabah baru 10 hari terakhir yang belum bertransaksi (pertanyaan 3);
 - satu cabang melonjak pada hari kemarin (pertanyaan 4).
@@ -62,7 +62,7 @@ BOBOT_KANAL = {"mobile": 45, "atm": 18, "teller": 9, "web": 13, "ecommerce": 15}
 JENIS = {"mobile": ["transfer_keluar", "transfer_masuk", "angsuran", "transfer_keluar"], "atm": ["tarik", "tarik", "setor"],
          "teller": ["setor", "tarik", "angsuran"], "web": ["transfer_keluar", "transfer_masuk", "angsuran"],
          "ecommerce": ["bayar_belanja"]}
-AKAD = ["MRB", "MRB", "MRB", "MSY", "MDH", "IJR", "IJR", "murabahah"]
+AKAD = ["MRB", "MRB", "MRB", "MSY", "MDH", "IJR", "IJR", "MURABAHAH"]
 
 
 

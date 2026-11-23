@@ -55,7 +55,7 @@ var jenisPerKanal = map[string][]string{
 	"web":       {"transfer_keluar", "transfer_masuk", "angsuran"},
 	"ecommerce": {"bayar_belanja"},
 }
-var kodeAkad = []string{"MRB", "MRB", "MRB", "MSY", "MDH", "IJR", "IJR", "murabahah"}
+var kodeAkad = []string{"MRB", "MRB", "MRB", "MSY", "MDH", "IJR", "IJR", "MURABAHAH"}
 var keteranganTrx = []string{"", "", "", "zakat profesi", "infak masjid", "wakaf uang", "belanja bulanan", "gaji", "sedekah"}
 
 const jumlahRekening = 600

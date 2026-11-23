@@ -133,6 +133,15 @@ Latensi ingest berkeparahan peringatan karena data backfill historis dari genera
 berlatensi besar; ubah `DQ_LATENSI_KEPARAHAN=error` untuk data live. Pesan gagal menyebut aturan,
 jumlah pelanggar, dan contoh baris (trx_id dan nilai yang salah).
 
+Keputusan pengampu (23 Nov 2026):
+
+- **Kolom wajib kosong tetap ketat**: satu baris saja dengan kolom wajib kosong menggagalkan gerbang
+  (error) dan gold tidak diterbitkan. Tidak ada karantina dengan ambang untuk kolom wajib.
+- **Kode akad peka huruf**: hanya `MRB`, `MSY`, `MDH`, `IJR` (spasi di tepi dibuang) dan nama lengkap
+  huruf besar (`MURABAHAH`, ...). Huruf kecil seperti `mrb` atau `Murabahah` tidak valid dan masuk
+  `akad_karantina`, sama di ETL (`pipeline/silver.py`) dan ELT (macro `akad_std`).
+- **Retensi archive 10 tahun** (UU 8/1997) dikonfirmasi.
+
 ## Fitur untuk tim AI: `gold.fitur_nasabah`
 
 Grain satu nasabah per `tgl_fitur`. Kolom: `trx_7h`, `nominal_7h`, `trx_30h`, `nominal_30h`,
@@ -161,7 +170,7 @@ Alasan: dashboard pagi membaca gold setiap hari (warm). Analisis tahunan membaca
 jadi data 13-24 bulan harus tetap bisa di-query seketika (Glacier Instant Retrieval, bukan Glacier
 Flexible). Bronze lebih dari dua tahun hanya dibutuhkan untuk audit dan pemrosesan ulang, boleh
 menunggu 3-5 jam (archive). Retensi 10 tahun mengikuti kewajiban penyimpanan dokumen perusahaan
-(UU 8/1997); sesuaikan bila kebijakan internal bank menetapkan lain.
+(UU 8/1997), dikonfirmasi pengampu 23 Nov 2026.
 
 Data Iceberg tidak boleh dihapus dengan expiration lifecycle: metadata masih menunjuk berkas itu dan
 tabel menjadi rusak. Penghapusan silver/gold dilakukan lewat Iceberg.

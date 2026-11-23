@@ -49,7 +49,7 @@ transform(lowerUTF8(trimBoth({{ c }})),
 {%- endmacro %}
 
 {% macro akad_std(c) -%}
-transform(upperUTF8(trimBoth({{ c }})),
+transform(trimBoth({{ c }}),
   ['MRB', 'MURABAHAH', 'MSY', 'MUSYARAKAH', 'MDH', 'MUDHARABAH', 'MUDARABAH', 'IJR', 'IJARAH'],
   ['MRB', 'MRB', 'MSY', 'MSY', 'MDH', 'MDH', 'MDH', 'IJR', 'IJR'],
   '')

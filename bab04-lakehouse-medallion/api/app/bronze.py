@@ -49,8 +49,8 @@ BOBOT_KANAL = {"mobile": 45, "atm": 18, "teller": 9, "web": 13, "ecommerce": 15}
 JENIS = {"mobile": ["transfer_keluar", "transfer_masuk", "angsuran"], "atm": ["tarik", "setor"],
          "teller": ["setor", "tarik", "angsuran"], "web": ["transfer_keluar", "transfer_masuk"],
          "ecommerce": ["bayar_belanja"]}
-AKAD = ["MRB", "MRB", "MSY", "MDH", "IJR", "murabahah", "mrb"]
-AKAD_RUSAK = ["MRBH", "XYZ", ""]
+AKAD = ["MRB", "MRB", "MRB", "MSY", "MDH", "IJR", "MURABAHAH"]
+AKAD_RUSAK = ["MRBH", "XYZ", "", "mrb"]  # huruf kecil tidak valid (keputusan pengampu 23 Nov)
 N_NASABAH = 240
 TRX_PER_HARI = 900
 

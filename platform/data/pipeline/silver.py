@@ -118,7 +118,7 @@ def akad_pembiayaan() -> int:
     df = terakhir(bronze.baca("akad_pembiayaan")).filter(pl.col("_op").fill_null("") != "d")
     df = df.with_columns(
         pl.col("kode_akad").alias("kode_akad_asli"),
-        pl.col("kode_akad").str.strip_chars().str.to_uppercase().replace_strict(AKAD, default=None)
+        pl.col("kode_akad").str.strip_chars().replace_strict(AKAD, default=None)
           .alias("kode_akad"))
     cols = [pl.col("id").alias("akad_id"), "nasabah_id", "rekening_id", "cabang_id", "kode_akad",
             "kode_akad_asli", pl.col("plafon").round(2).cast(pl.Decimal(18, 2)),
