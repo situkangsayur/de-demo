@@ -61,6 +61,29 @@ PostgreSQL bab05: `wal_level=logical`, `max_replication_slots`/`max_wal_senders`
 Debezium (database `bank` dan `orders`), user replikasi atau hak `REPLICATION` untuk Debezium (password dari
 `.env`). Perubahan ini tidak boleh mengganggu demo Sister (uji.sh bab05 tetap lolos).
 
+### Detail final dari penulis S (23 Nov, sudah di-push `sister-hpc-demo` cb2eff1)
+
+- `nasabah.segmen`: `ritel`, `prioritas`, `umkm` (CHECK).
+- Pencairan akad dicatat sebagai transaksi `jenis=transfer_masuk` dengan `akad_id` terisi; angsuran `jenis=angsuran`.
+- Kolom tambahan: `rekening.cabang_id`, `rekening.updated_at`; `transaksi.saldo_setelah`, `transfer_id`,
+  `akad_id`, `idempotency_key` (UNIQUE), `keterangan`, `request_id`; `akad_pembiayaan.rekening_id`, `terbayar`,
+  `diajukan_at`, `updated_at`.
+- `transaksi.cabang_id` diisi cabang pembuka rekening bila kosong (termasuk kanal `ecommerce`/`mobile`).
+- Tanpa header `Idempotency-Key`, request ulang = transaksi ganda (bahan data kotor). `occurred_at` > 5 menit di
+  masa depan ditolak 400; waktu lampau diterima. Saldo kurang → 409.
+- Untuk transaksi tanpa `occurred_at`, `created_at` bisa ~1 ms lebih awal; deteksi data terlambat pakai ambang
+  (mis. > 1 menit).
+- Subject `bank.cabang.dibuat`, `bank.nasabah.{dibuat,diperbarui}`, `bank.rekening.dibuka`,
+  `bank.transaksi.dibuat`, `bank.akad.{diajukan,disetujui,ditolak,dicairkan,diangsur,dilunasi}`; `event_type` =
+  subject. Stream `BANK` retensi 7 hari, 512 MB, jendela duplikat 2 menit.
+- Debezium: publication **`dbz_bank`** (5 tabel bank) dan **`dbz_orders`** (`orders`, `order_history`), sudah dibuat;
+  pakai `publication.autocreate.mode=disabled`. Role `DEBEZIUM_USER`/`DEBEZIUM_PASSWORD` dari `.env` bab05
+  (contoh `debezium`/`changeme-debezium`), dibuat hanya pada volume baru. `max_slot_wal_keep_size=1024MB`.
+- Checkout toko dari rekening: `POST /api/orders` dengan `no_rekening` di body; kolom `orders.no_rekening`.
+- API bank lewat APISIX `/api/bank/*` (header `apikey`): cabang, nasabah (GET/POST/PATCH), rekening (+ `/mutasi`),
+  transaksi (GET `?limit=&since=`, POST setor/tarik), transfer, akad (+ `/{id}/{setujui|tolak|cairkan|angsuran}`),
+  ringkasan. Rincian di README bab05.
+
 ## Ingestion DE (penulis A)
 
 - **Debezium Server** (`quay.io/debezium/server:3.6.3.Final`, sink `nats-jetstream`), dua instance: database
