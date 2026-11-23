@@ -1,0 +1,48 @@
+# Lab Bab 5 (P05): ETL satu mesin dengan Arrow, Polars, DuckDB, DataFusion, dan pandas.
+# Dataset dibangkitkan di volume `data` dan hilang dengan `docker compose down -v`.
+name: de-bab05
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  api:
+    image: de-bab05-api:1.0
+    build: ./api
+    logging: *logging
+    environment:
+      SERVICE_NAME: bab05-api
+      DATA_DIR: /data
+      TOKEN_PEPPER: ${TOKEN_PEPPER:?isi TOKEN_PEPPER di .env}
+      THREADS: ${BENCH_CPUS:-4}
+      POLARS_MAX_THREADS: ${BENCH_CPUS:-4}
+      OMP_NUM_THREADS: ${BENCH_CPUS:-4}
+      OPENBLAS_NUM_THREADS: "1"
+    volumes: ["data:/data"]
+    # Benchmark dibatasi agar tidak mengganggu proyek lain; pandas pada dataset besar dapat
+    # dibunuh OOM killer dan itu bagian dari demo batas memori.
+    mem_limit: ${BENCH_MEM_LIMIT:-3g}
+    cpus: ${BENCH_CPUS:-4}
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:52501:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/sehat')"]
+      interval: 3s
+      timeout: 3s
+      retries: 100
+
+  ui:
+    image: de-bab05-ui:1.0
+    build: ./ui
+    logging: *logging
+    environment:
+      API_URL: http://api:8000
+    mem_limit: 256m
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:52500:3000"
+    depends_on:
+      api: { condition: service_healthy }
+
+volumes:
+  data:
