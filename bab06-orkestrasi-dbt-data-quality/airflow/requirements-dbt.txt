@@ -1,0 +1,4 @@
+# Virtualenv dbt (/opt/venv-dbt), terpisah dari Airflow agar dependensi tidak bentrok.
+# Versi sama dengan platform (platform/data/airflow/requirements-data.txt).
+dbt-core==1.12.7
+dbt-clickhouse==1.10.3

@@ -1,0 +1,20 @@
+name: trx_lab
+version: "1.0.0"
+profile: trx_lab
+config-version: 2
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+vars:
+  tgl: "2026-11-01"       # diganti oleh Airflow: --vars '{tgl: <ds>}'
+
+models:
+  trx_lab:
+    staging:
+      +materialized: view
+    gold:
+      +materialized: table
+      +engine: MergeTree()
+      +partition_by: tgl

@@ -1,0 +1,70 @@
+:root {
+  --bg: #f6f7f5; --panel: #ffffff; --teks: #1d2420; --redup: #5f6b64; --garis: #dfe4e0;
+  --utama: #0f6e63; --utama-muda: #d8ece8; --emas: #b8862b; --merah: #b3402f; --hijau: #2f7d4a;
+  --kuning: #a66d00; --kode: #f0f2ef; --wh: #0f6e63; --lk: #b8862b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121614; --panel: #1b201d; --teks: #e6ebe8; --redup: #9aa59f; --garis: #2c3430;
+    --utama: #4fb8a8; --utama-muda: #1f3a35; --emas: #d9a94c; --merah: #e0705e; --hijau: #5fbf7f;
+    --kuning: #e0a840; --kode: #232a26; --wh: #4fb8a8; --lk: #d9a94c;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121614; --panel: #1b201d; --teks: #e6ebe8; --redup: #9aa59f; --garis: #2c3430;
+  --utama: #4fb8a8; --utama-muda: #1f3a35; --emas: #d9a94c; --merah: #e0705e; --hijau: #5fbf7f;
+  --kuning: #e0a840; --kode: #232a26; --wh: #4fb8a8; --lk: #d9a94c;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--teks); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--utama); }
+header.atas { background: var(--panel); border-bottom: 1px solid var(--garis); padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
+header.atas b { font-size: 15px; margin-right: 10px; }
+header.atas nav { display: flex; flex-wrap: wrap; gap: 4px; }
+header.atas nav a { text-decoration: none; padding: 4px 10px; border-radius: 6px; color: var(--teks); }
+header.atas nav a.aktif, header.atas nav a:hover { background: var(--utama-muda); color: var(--utama); }
+main { max-width: 1280px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 20px; margin: 4px 0 4px; } h2 { font-size: 16px; margin: 0 0 6px; } h3 { font-size: 14px; margin: 10px 0 6px; }
+p.redup, .redup { color: var(--redup); }
+.kartu { background: var(--panel); border: 1px solid var(--garis); border-radius: 10px; padding: 14px; margin: 12px 0; }
+.kisi { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.baris { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, select, input { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--garis); background: var(--panel); color: var(--teks); }
+button { cursor: pointer; } button.utama { background: var(--utama); border-color: var(--utama); color: #fff; }
+button.bahaya { border-color: var(--merah); color: var(--merah); }
+button:disabled { opacity: .5; cursor: default; }
+.sakelar { display: inline-flex; border: 1px solid var(--garis); border-radius: 8px; overflow: hidden; }
+.sakelar button { border: 0; border-radius: 0; } .sakelar button.on { background: var(--utama); color: #fff; }
+.tabel-wadah { overflow-x: auto; max-height: 420px; overflow-y: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { border-bottom: 1px solid var(--garis); padding: 4px 8px; text-align: left; white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--panel); color: var(--redup); font-weight: 600; }
+td.angka, th.angka { text-align: right; font-variant-numeric: tabular-nums; }
+pre, code { background: var(--kode); border-radius: 6px; font: 12px/1.45 ui-monospace, Menlo, monospace; }
+pre { padding: 10px; overflow-x: auto; white-space: pre; } code { padding: 1px 4px; }
+.lencana { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 12px; font-weight: 600; }
+.ok { background: color-mix(in srgb, var(--hijau) 18%, transparent); color: var(--hijau); }
+.gagal { background: color-mix(in srgb, var(--merah) 18%, transparent); color: var(--merah); }
+.warn { background: color-mix(in srgb, var(--kuning) 20%, transparent); color: var(--kuning); }
+.netral { background: var(--utama-muda); color: var(--utama); }
+.angka-besar { font-size: 22px; font-weight: 700; }
+.wh { color: var(--wh); } .lk { color: var(--lk); }
+details summary { cursor: pointer; color: var(--redup); }
+.galat { color: var(--merah); white-space: pre-wrap; }
+svg text { fill: var(--redup); font-size: 11px; }
+@media (max-width: 640px) { main { padding: 12px 16px; } .kisi { grid-template-columns: 1fr; } }
+/* tambahan lab P07 */
+.legenda { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--redup); }
+.legenda i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+.progres { height: 10px; background: var(--garis); border-radius: 99px; overflow: hidden; }
+.progres > div { height: 100%; background: var(--utama); transition: width .4s; }
+.lsm-kotak { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 4px; border: 1px solid var(--garis); border-radius: 6px; margin: 2px; background: var(--panel); min-height: 30px; align-items: center; }
+.lsm-kunci { font: 11px ui-monospace, monospace; padding: 1px 4px; border-radius: 4px; background: var(--utama-muda); color: var(--utama); }
+.lsm-kunci.mati { text-decoration: line-through; opacity: .5; }
+.lsm-kunci.sorot { background: var(--emas); color: #fff; }
+.node-os { border: 1px solid var(--garis); border-radius: 8px; padding: 10px; min-width: 220px; flex: 1; }
+.shard { display: inline-block; width: 64px; padding: 6px 4px; margin: 3px; border-radius: 6px; text-align: center; font-size: 12px; font-weight: 600; color: #fff; }
+.blok-rantai { border: 2px solid var(--garis); border-radius: 8px; padding: 8px 10px; min-width: 210px; font-size: 12px; background: var(--panel); }
+.blok-rantai.rusak { border-color: var(--merah); }
+.blok-rantai.ok { border-color: var(--hijau); }
+mark { background: color-mix(in srgb, var(--emas) 45%, transparent); color: inherit; padding: 0 2px; border-radius: 3px; }

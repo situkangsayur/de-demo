@@ -1,0 +1,19 @@
+version: 2
+
+models:
+  - name: fakta_transaksi
+    description: "Fakta grain satu transaksi (audit -> gold lewat REPLACE PARTITION)."
+    columns:
+      - name: trx_id
+        data_tests:
+          - unique:
+              config: {meta: {dimensi: uniqueness}}
+  - name: harian_cabang
+    description: "Jumlah dan nominal transaksi per cabang per hari, dibaca dashboard."
+    columns:
+      - name: cabang_id
+        data_tests:
+          - not_null:
+              config: {meta: {dimensi: completeness}}
+  - name: pembiayaan_harian
+    description: "Pembiayaan cair per kode akad per hari."

@@ -1,0 +1,73 @@
+version: 2
+
+# Setiap test diberi meta.dimensi (DAMA-DMBOK, slide P06): completeness, validity, uniqueness,
+# timeliness, consistency, accuracy. UI mengelompokkan hasil test menurut dimensi ini.
+models:
+  - name: stg_transaksi
+    description: "Transaksi satu hari (var tgl) sesudah cast tipe, standardisasi kanal, dan dedup per _event_id."
+    columns:
+      - name: trx_id
+        description: "Id transaksi dari aplikasi (grain fakta)."
+        data_tests:
+          - not_null:
+              config: {meta: {dimensi: completeness}}
+          - unique:
+              config: {meta: {dimensi: uniqueness}}
+      - name: rekening_id
+        data_tests:
+          - not_null:
+              config: {meta: {dimensi: completeness}}
+          - relationships:
+              arguments: {to: ref('stg_rekening'), field: rekening_id}
+              config: {meta: {dimensi: consistency}}
+      - name: cabang_id
+        data_tests:
+          - relationships:
+              arguments: {to: ref('stg_cabang'), field: cabang_id}
+              config: {meta: {dimensi: consistency}}
+      - name: kanal
+        data_tests:
+          - accepted_values:
+              arguments: {values: ['mobile', 'atm', 'teller', 'web', 'ecommerce']}
+              config: {meta: {dimensi: validity}}
+      - name: nominal
+        data_tests:
+          - not_null:
+              config: {meta: {dimensi: completeness}}
+          - rentang_nilai:
+              arguments: {min_nilai: 1, max_nilai: 5000000000}
+              config: {meta: {dimensi: validity}}
+
+  - name: stg_akad
+    description: "Akad pembiayaan satu hari; kode akad sudah distandardkan."
+    columns:
+      - name: akad_id
+        data_tests:
+          - unique:
+              config: {meta: {dimensi: uniqueness}}
+      - name: kode_akad
+        data_tests:
+          - accepted_values:
+              arguments: {values: ['MRB', 'MSY', 'MDH', 'IJR']}
+              config: {meta: {dimensi: validity}}
+
+  - name: stg_cabang
+    description: "Daftar cabang aktif (full load)."
+    columns:
+      - name: cabang_id
+        data_tests:
+          - unique:
+              config: {meta: {dimensi: uniqueness}}
+          - not_null:
+              config: {meta: {dimensi: completeness}}
+
+  - name: stg_rekening
+    description: "Daftar rekening (full load)."
+    columns:
+      - name: rekening_id
+        data_tests:
+          - unique:
+              config: {meta: {dimensi: uniqueness}}
+
+  - name: stg_kontrol
+    description: "Total kontrol core banking untuk tanggal var tgl."

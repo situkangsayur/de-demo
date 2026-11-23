@@ -1,0 +1,15 @@
+# Profil dbt-clickhouse. Kredensial dari environment container (.env), tidak ada sandi di repo.
+trx_lab:
+  target: audit
+  outputs:
+    audit:                # WRITE-AUDIT: semua model dibangun di database audit
+      type: clickhouse
+      driver: http
+      host: "{{ env_var('CLICKHOUSE_HOST', 'clickhouse') }}"
+      port: 8123
+      user: "{{ env_var('CLICKHOUSE_USER', 'lab') }}"
+      password: "{{ env_var('CLICKHOUSE_PASSWORD') }}"
+      schema: audit
+      threads: 4
+      connect_timeout: 20
+      send_receive_timeout: 300

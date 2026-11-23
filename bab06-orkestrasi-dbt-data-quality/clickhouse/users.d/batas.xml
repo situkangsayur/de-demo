@@ -1,0 +1,9 @@
+<!-- Batas memori query agar ClickHouse lab tetap kecil (container mem_limit 1 GB). -->
+<clickhouse>
+  <profiles>
+    <default>
+      <max_memory_usage>600000000</max_memory_usage>
+      <max_threads>4</max_threads>
+    </default>
+  </profiles>
+</clickhouse>

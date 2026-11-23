@@ -1,0 +1,134 @@
+# Lab P07: storage engine (B-tree vs LSM/MergeTree), row vs columnar, NoSQL, dan serving store.
+# Berdiri sendiri: api membangkitkan data bank syariah berskema platform dan memuatnya ke semua store.
+name: de-bab07
+
+x-os: &os
+  image: opensearchproject/opensearch:2.19.1
+  mem_limit: 900m
+  ulimits:
+    memlock: {soft: -1, hard: -1}
+    nofile: {soft: 65536, hard: 65536}
+
+x-os-env: &os-env
+  cluster.name: lab07-search
+  discovery.seed_hosts: os1,os2
+  cluster.initial_cluster_manager_nodes: os1,os2
+  bootstrap.memory_lock: "false"
+  OPENSEARCH_JAVA_OPTS: -Xms${OS_HEAP:-384m} -Xmx${OS_HEAP:-384m}
+  DISABLE_SECURITY_PLUGIN: "true"             # HANYA untuk lab lokal; produksi wajib security plugin (P14)
+  DISABLE_INSTALL_DEMO_CONFIG: "true"
+  # Disk server lab hampir penuh: watermark disk dimatikan agar shard tetap dialokasikan (catatan bab07 lama).
+  cluster.routing.allocation.disk.threshold_enabled: "false"
+
+services:
+  postgres:                        # B-tree, heap baris, WAL
+    image: postgres:16.4-alpine
+    mem_limit: 512m
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_wal_size=1GB"]
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?isi PG_PASSWORD di .env}
+      POSTGRES_DB: bank
+    volumes:
+      - pg:/var/lib/postgresql/data
+      - ./postgres/01-skema.sql:/docker-entrypoint-initdb.d/01-skema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lab -d bank"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  clickhouse:                      # kolom, MergeTree (keluarga LSM)
+    image: clickhouse/clickhouse-server:24.8.14.39
+    mem_limit: 1500m
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-lab}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?isi CLICKHOUSE_PASSWORD di .env}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports: ["${BIND_ADDR:-127.0.0.1}:52702:8123"]
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+    volumes:
+      - ch:/var/lib/clickhouse
+      - ./clickhouse/config.d/lab.xml:/etc/clickhouse-server/config.d/lab.xml:ro
+      - ./clickhouse/users.d/batas.xml:/etc/clickhouse-server/users.d/batas.xml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+  redis:                           # key-value di memori + AOF (log append-only)
+    image: redis:7-alpine
+    mem_limit: 256m
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "200mb", "--maxmemory-policy", "noeviction"]
+    volumes: [rd:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  os1:                             # OpenSearch node 1 (search: inverted index)
+    <<: *os
+    environment:
+      <<: *os-env
+      node.name: os1
+    ports: ["${BIND_ADDR:-127.0.0.1}:52703:9200"]
+    volumes: [os1:/usr/share/opensearch/data]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=2s' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  os2:                             # OpenSearch node 2 (menampung replica shard)
+    <<: *os
+    environment:
+      <<: *os-env
+      node.name: os2
+    volumes: [os2:/usr/share/opensearch/data]
+
+  api:
+    image: de-bab07-api:1.0
+    build: ./api
+    mem_limit: 512m
+    environment:
+      PG_PASSWORD: ${PG_PASSWORD}
+      REDIS_ADDR: redis:6379
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-lab}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      OPENSEARCH_URL: http://os1:9200
+      JUMLAH_NASABAH: ${JUMLAH_NASABAH:-5000}
+      JUMLAH_TRANSAKSI: ${JUMLAH_TRANSAKSI:-400000}
+      HARI: ${HARI:-90}
+    ports: ["${BIND_ADDR:-127.0.0.1}:52701:8080"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      clickhouse: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      os1: {condition: service_healthy}
+      os2: {condition: service_started}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  ui:
+    image: de-bab07-ui:1.0
+    build: ./ui
+    mem_limit: 256m
+    environment:
+      API_URL: http://api:8080
+    ports: ["${BIND_ADDR:-127.0.0.1}:52700:3000"]
+    depends_on:
+      api: {condition: service_healthy}
+
+volumes:
+  pg:
+  ch:
+  rd:
+  os1:
+  os2:

@@ -1,0 +1,17 @@
+version: 2
+
+sources:
+  - name: raw
+    description: "Bronze yang dimuat apa adanya ke ClickHouse (kolom data String, seperti kontrak bronze platform)."
+    schema: raw
+    tables:
+      - name: transaksi
+        description: "Event bank.transaksi.dibuat per partisi dt (timpa per partisi oleh Airflow)."
+      - name: akad_pembiayaan
+        description: "Event bank.akad.* per partisi dt."
+      - name: cabang
+        description: "Snapshot cabang (full load)."
+      - name: rekening
+        description: "Snapshot rekening (full load)."
+      - name: kontrol
+        description: "Total kontrol harian dari laporan core banking (sumber kebenaran untuk uji accuracy)."

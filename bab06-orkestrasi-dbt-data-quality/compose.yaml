@@ -1,0 +1,130 @@
+# Lab P06: orkestrasi Airflow 3.3.2 + dbt-clickhouse + data quality (write-audit-publish).
+# Berdiri sendiri (tanpa platform): bronze sintetis berskema platform dibangkitkan oleh api.
+name: de-bab06
+
+x-ch-env: &ch-env
+  CLICKHOUSE_URL: http://clickhouse:8123
+  CLICKHOUSE_HOST: clickhouse
+  CLICKHOUSE_USER: ${CLICKHOUSE_USER:-lab}
+  CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?isi CLICKHOUSE_PASSWORD di .env}
+
+services:
+  pg:                              # metadata Airflow
+    image: postgres:16.4-alpine
+    mem_limit: 300m
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${AIRFLOW_PG_PASSWORD:?isi AIRFLOW_PG_PASSWORD di .env}
+      POSTGRES_DB: airflow
+    volumes: [pg:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  clickhouse:                      # warehouse: raw, audit (dbt), gold, meta
+    image: clickhouse/clickhouse-server:24.8.14.39
+    mem_limit: 1500m
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-lab}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports: ["${BIND_ADDR:-127.0.0.1}:52603:8123"]
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+    volumes:
+      - ch:/var/lib/clickhouse
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+      - ./clickhouse/users.d/batas.xml:/etc/clickhouse-server/users.d/batas.xml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping | grep -q Ok"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+  api:                             # generator bronze, core banking (flaky), kendali demo, jembatan Airflow
+    image: de-bab06-api:1.0
+    build: ./api
+    mem_limit: 128m
+    environment:
+      <<: *ch-env
+      AIRFLOW_URL: http://airflow:8080
+      AIRFLOW_USER: ${AIRFLOW_ADMIN_USER:-admin}
+      AIRFLOW_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?isi AIRFLOW_ADMIN_PASSWORD di .env}
+      BRONZE_DIR: /data/bronze
+      DBT_TARGET_DIR: /opt/lab/dbt_target
+      HARI: ${HARI:-10}
+      SLA_MENIT: ${SLA_MENIT:-5}
+    ports: ["${BIND_ADDR:-127.0.0.1}:52601:8080"]
+    volumes:
+      - data:/data
+      - dbt_target:/opt/lab/dbt_target:ro
+    depends_on:
+      clickhouse: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  airflow:                         # standalone: api-server + scheduler + dag-processor + triggerer
+    image: de-bab06-airflow:1.0
+    build: ./airflow
+    mem_limit: 3g
+    environment:
+      <<: *ch-env
+      TZ: UTC
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Jakarta
+      AIRFLOW__CORE__PARALLELISM: "6"
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://localhost:8080/execution/
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: ${AIRFLOW_ADMIN_USER:-admin}:admin
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/sandi/passwords.json
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_PG_PASSWORD}@pg:5432/airflow
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?isi AIRFLOW_JWT_SECRET di .env}
+      AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY:?isi AIRFLOW_API_SECRET_KEY di .env}
+      AIRFLOW__API__BASE_URL: http://${BIND_ADDR:-127.0.0.1}:52602
+      AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "20"
+      AIRFLOW__SCHEDULER__TASK_INSTANCE_HEARTBEAT_SEC: "5"
+      AIRFLOW_ADMIN_USER: ${AIRFLOW_ADMIN_USER:-admin}
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+      PYTHONPATH: /opt/airflow/dags   # triggerer perlu mengimpor lab.sla (callback Deadline Alert)
+      LAB_API_URL: http://api:8080
+      BRONZE_DIR: /data/bronze
+      SLA_MENIT: ${SLA_MENIT:-5}
+    ports: ["${BIND_ADDR:-127.0.0.1}:52602:8080"]
+    volumes:
+      - ./dags:/opt/airflow/dags:ro
+      - ./dbt:/opt/lab/dbt:ro
+      - data:/data
+      - dbt_target:/opt/lab/dbt_target
+      - airflow_logs:/opt/airflow/logs
+    depends_on:
+      pg: {condition: service_healthy}
+      clickhouse: {condition: service_healthy}
+      api: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8080/api/v2/monitor/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  ui:
+    image: de-bab06-ui:1.0
+    build: ./ui
+    mem_limit: 256m
+    environment:
+      API_URL: http://api:8080
+    ports: ["${BIND_ADDR:-127.0.0.1}:52600:3000"]
+    depends_on:
+      api: {condition: service_healthy}
+
+volumes:
+  pg:
+  ch:
+  data:
+  dbt_target:
+  airflow_logs:
