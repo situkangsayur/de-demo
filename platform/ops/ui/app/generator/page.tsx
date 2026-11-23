@@ -139,8 +139,8 @@ export default function Generator() {
         <div className="card">
           <h2>Backfill riwayat</h2>
           <p className="small muted">
-            Membangkitkan riwayat N hari ke belakang dengan <code>occurred_at</code> historis (pola jam, akhir pekan lebih sepi, akhir bulan lebih ramai, dua hari lonjakan di satu cabang). Mulai
-            kecil; 30 hari × 200 aksi ≈ 6.000 aksi.
+            Membangkitkan riwayat N hari ke belakang dengan <code>occurred_at</code> historis yang berurutan (nasabah → rekening → transaksi/akad → perubahan profil), pola jam, akhir pekan
+            lebih sepi, akhir bulan lebih ramai, dua hari lonjakan di satu cabang. Mulai kecil; 30 hari × 200 aksi ≈ 6.000 aksi.
           </p>
           <label>
             Hari: <input type="number" min={1} max={800} value={days} onChange={(e) => setDays(Number(e.target.value))} style={{ width: 90 }} /> <span className="small muted">(13 bulan ≈ 395)</span>
@@ -149,7 +149,7 @@ export default function Generator() {
             Aksi per hari: <input type="number" min={10} max={20000} value={perDay} onChange={(e) => setPerDay(Number(e.target.value))} style={{ width: 90 }} />
           </label>
           <label className="row">
-            <input type="checkbox" checked={shop} onChange={(e) => setShop(e.target.checked)} /> sertakan belanja toko (order dibuat dengan waktu sekarang)
+            <input type="checkbox" checked={shop} onChange={(e) => setShop(e.target.checked)} /> sertakan belanja toko (checkout dengan waktu historis)
           </label>
           <button className="primary" disabled={st?.mode !== "idle"} onClick={() => act(() => post("gen/backfill", { days, per_day: perDay, with_shop: shop }))}>
             Jalankan backfill

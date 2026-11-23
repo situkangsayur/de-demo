@@ -158,23 +158,61 @@ ok = ok and {"c", "u"} <= ops
 raise SystemExit(0 if ok else 1)
 PY
 
-step "Backfill kecil (3 hari x 20 aksi) -> partisi dt historis"
-curl -sf -X POST "$API/api/gen/backfill" -H 'content-type: application/json' -d '{"days":3,"per_day":20,"with_shop":false}' >/dev/null && ok "backfill dimulai" || bad "backfill gagal dimulai"
-for _ in $(seq 1 60); do
+step "Backfill kecil (4 hari x 30 aksi, dengan belanja) -> partisi dt historis berurutan"
+curl -sf -X POST "$API/api/gen/backfill" -H 'content-type: application/json' -d '{"days":4,"per_day":30,"with_shop":true}' >/dev/null && ok "backfill dimulai" || bad "backfill gagal dimulai"
+for _ in $(seq 1 90); do
   mode=$(jget "$API/api/gen/status" | py "import json,sys; print(json.load(sys.stdin)['mode'])")
   [ "$mode" = "idle" ] && break
   sleep 2
 done
 sleep 15
-D3=$(date -u -d '-3 days' +%F)
-D2=$(date -u -d '-2 days' +%F)
+TODAY=$(date -u +%F)
 jget "$API/api/flow/stats" | py "
 import json,sys
 d=json.load(sys.stdin)['bronze']['partitions']
-dts=sorted({p['dt'] for p in d if p['source']=='app' and p['entity']=='transaksi'})
-print('    dt bronze/app/transaksi:', dts)
-sys.exit(0 if ('$D3' in dts or '$D2' in dts) else 1)
-" && ok "backfill menulis partisi dt historis" || bad "partisi historis tidak ada"
+bad=0
+for ent in ('app/transaksi','app/nasabah','app/rekening','app/orders','cdc/transaksi','cdc/rekening','cdc/nasabah','cdc/orders'):
+    dts=sorted({p['dt'] for p in d if p['source']+'/'+p['entity']==ent})
+    hist=[x for x in dts if x < '$TODAY']
+    print('    %-15s dt historis: %s' % (ent, hist))
+    bad += 0 if hist else 1
+sys.exit(bad)
+" && ok "backfill menulis partisi dt historis (nasabah, rekening, transaksi, orders; app dan cdc)" || bad "partisi historis kurang"
+q3=$(jget "$API/api/gen/status" | py "import json,sys; print(json.load(sys.stdin)['counts'].get('nasabah baru tanpa transaksi (Q3)',0))")
+[ "${q3:-0}" -ge 1 ] && ok "ada $q3 nasabah baru yang sengaja tidak bertransaksi (Q3)" || bad "tidak ada nasabah Q3"
+
+step "Urutan waktu dan before (CDC, PyArrow di container ingestor)"
+"${DC[@]}" exec -T ingestor python - <<'PY' && ok "urutan waktu konsisten dan _before terisi pada update" || bad "urutan waktu atau _before bermasalah"
+import json
+import pyarrow.parquet as pq
+from pyarrow import fs
+from ingestor.common import s3fs
+s3 = s3fs()
+def rows(ent, cols):
+    sel = fs.FileSelector(f"lake/bronze/{ent}", recursive=True, allow_not_found=True)
+    out = []
+    for i in s3.get_file_info(sel):
+        if i.path.endswith(".parquet"):
+            t = pq.read_table(i.path, filesystem=s3)
+            out += t.select([c for c in cols if c in t.column_names]).to_pylist()
+    return out
+from datetime import datetime
+ts = lambda x: datetime.fromisoformat(x.replace("Z", "+00:00"))
+nas = {r["id"]: ts(r["created_at"]) for r in rows("cdc/nasabah", ["id", "created_at"])}
+rek = {r["id"]: (ts(r["dibuka_at"]), r["nasabah_id"]) for r in rows("cdc/rekening", ["id", "dibuka_at", "nasabah_id"])}
+trx = rows("cdc/transaksi", ["id", "rekening_id", "occurred_at"])
+viol_r = [k for k, (d, n) in rek.items() if n in nas and d < nas[n]]
+viol_t = [t["id"] for t in trx if t["rekening_id"] in rek and ts(t["occurred_at"]) < rek[t["rekening_id"]][0]]
+print(f"    rekening dibuka sebelum nasabah terdaftar: {len(viol_r)} dari {len(rek)}")
+print(f"    transaksi sebelum rekening dibuka       : {len(viol_t)} dari {len(trx)}")
+up = [r for r in rows("cdc/nasabah", ["_op", "_before", "kota"]) if r["_op"] == "u"]
+filled = [r for r in up if r.get("_before")]
+print(f"    cdc/nasabah op=u: {len(up)}, _before terisi: {len(filled)}")
+if filled:
+    b = json.loads(filled[-1]["_before"])
+    print(f"    contoh _before.kota={b.get('kota')!r} -> after.kota={filled[-1]['kota']!r}")
+raise SystemExit(0 if not viol_r and not viol_t and up and len(filled) == len(up) else 1)
+PY
 
 step "UI dan API untuk UI"
 for path in / /generator; do

@@ -73,3 +73,25 @@ func TestAsMapAndList(t *testing.T) {
 		t.Fatal("str angka bulat")
 	}
 }
+
+func TestPickNasabahRespectsTimeOrder(t *testing.T) {
+	g := testGen()
+	now := time.Now()
+	old := &nasabah{ID: "old", Created: now.Add(-48 * time.Hour), Rek: []*rekening{{ID: "r1", Opened: now.Add(-47 * time.Hour)}}}
+	baru := &nasabah{ID: "baru", Created: now.Add(-1 * time.Hour), Rek: []*rekening{{ID: "r2", Opened: now.Add(-50 * time.Minute)}}}
+	dorm := &nasabah{ID: "dorm", Created: now.Add(-72 * time.Hour), Dormant: true, Rek: []*rekening{{ID: "r3", Opened: now.Add(-71 * time.Hour)}}}
+	g.nasabah = []*nasabah{old, baru, dorm}
+	at := now.Add(-24 * time.Hour)
+	for i := 0; i < 200; i++ {
+		n := g.pickNasabah(true, at)
+		if n == nil || n.ID != "old" {
+			t.Fatalf("pada %v hanya nasabah 'old' yang aktif dan sudah terdaftar, dapat %v", at, n)
+		}
+	}
+	if r := g.pickRek(baru, now.Add(-55*time.Minute)); r != nil {
+		t.Fatal("rekening belum dibuka tidak boleh dipilih")
+	}
+	if g.later(now.Add(-time.Hour), 20).After(time.Now()) {
+		t.Fatal("later tidak boleh melewati sekarang")
+	}
+}

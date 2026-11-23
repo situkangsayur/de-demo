@@ -58,6 +58,21 @@ class TestMapping(unittest.TestCase):
         self.assertEqual(r.record["_op"], "u")
         self.assertEqual(r.record["kota"], "Bogor")
         self.assertEqual(r.record["_ts_ms"], 1795000000000)
+        self.assertEqual(json.loads(r.record["_before"]), {"id": 5, "kota": "Bandung"})
+        # kolom data pertama (writer menempatkannya tepat sesudah 8 kolom metadata kontrak)
+        self.assertEqual([k for k in r.record if not k.startswith("_") or k == "_before"][0], "_before")
+
+    def test_cdc_insert_has_null_before_and_rekening_partition_dibuka_at(self):
+        env = {
+            "before": None,
+            "after": {"id": "r1", "saldo": 5, "dibuka_at": "2026-10-05T03:00:00Z", "updated_at": "2026-11-23T03:00:00Z"},
+            "source": {"lsn": 9},
+            "op": "u",
+            "ts_ms": 1795000000000,
+        }
+        r = map_message("CDC", "cdc.bank.rekening", json.dumps(env).encode(), None, T)[0]
+        self.assertEqual(r.dt, "2026-10-05")
+        self.assertIsNone(r.record["_before"])
 
     def test_cdc_delete_uses_before_and_ts_ms(self):
         env = {"before": {"id": 9}, "after": None, "source": {"lsn": 1}, "op": "d", "ts_ms": 1795000000000}

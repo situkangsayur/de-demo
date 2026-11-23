@@ -141,10 +141,11 @@ Buka dua tab di proyektor: **UI Aliran data** (`:52000`) dan **UI toko Sister** 
    baris tabel).
 2. **Envelope Debezium (±5 menit).** Klik baris `cdc.bank.nasabah` atau `cdc.bank.rekening`. Tunjukkan
    `op` (c/u/d/r), `before` vs `after`, `source.lsn`, `txId`, `ts_ms`. Ubah profil nasabah di UI toko
-   (tab bank) lalu muat ulang contoh `cdc.bank.nasabah`: `op=u` dengan `before` = null, karena tabel
-   memakai `REPLICA IDENTITY DEFAULT` (WAL hanya membawa nilai baru). Diskusikan: dengan `FULL` nilai
-   lama ikut terkirim (kolom yang berubah ditandai di UI), dengan biaya WAL lebih besar. Snapshot awal
-   (`op=r`) terlihat pada `cdc.bank.cabang`.
+   (tab bank) lalu muat ulang contoh `cdc.bank.nasabah`: `op=u`, kolom yang berubah antara `before`
+   dan `after` ditandai. `before` terisi karena tabel memakai `REPLICA IDENTITY FULL`; bandingkan
+   dengan `cdc.bank.transaksi`/`cdc.bank.cabang` yang memakai bawaan Postgres. Diskusikan biayanya
+   (WAL lebih besar). Di bronze nilai lama tersimpan di kolom `_before` (JSON). Snapshot awal (`op=r`)
+   terlihat pada `cdc.bank.cabang`.
 3. **Generator dan kotoran (±7 menit).** Buka halaman Generator, klik *Mulai* dengan laju 5/detik.
    Naikkan *Duplikat* ke 20% dan *Kode akad tidak valid* ke 30%. Kembali ke Aliran data: laju msg/s
    naik, feed bergerak. Di tabel partisi bronze, perhatikan `dt` hari ini dan beberapa `dt` kemarin
@@ -178,7 +179,7 @@ klien sungguhan dari 8 cabang dan kanal mobile/atm/web/teller (+ ecommerce untuk
 | Aksi | Bobot | Catatan |
 |---|---|---|
 | setor / tarik / transfer | 70 | nominal log-normal; tarik ATM kelipatan 50.000; sebagian besar di cabang asal nasabah |
-| belanja toko dibayar dari rekening | 10 | `POST /api/orders` dengan `no_rekening` |
+| belanja toko dibayar dari rekening | 10 | `POST /api/orders` dengan `no_rekening` dan `occurred_at` |
 | nasabah baru + rekening + setoran awal | 4 | 20% nasabah baru sengaja tidak pernah bertransaksi (pertanyaan direksi no. 3) |
 | ubah profil (kota/segmen/no_hp) | 2 + 60×p | bahan SCD-2 |
 | ajukan akad / proses akad (setujui, tolak, cairkan, angsuran) | 3 / 4 | 15% pengajuan ditolak |
@@ -189,6 +190,14 @@ Kotoran (peluang dapat diatur dari UI): **duplikat** (request dikirim ulang tanp
 **Lonjakan** dapat dipicu manual per cabang (mode live) dan otomatis pada dua hari acak (backfill).
 
 Backfill: `POST /api/gen/backfill {"days":30,"per_day":200,"with_shop":true}` (maksimal 800 hari).
+Waktu historis dikirim **berurutan**: setiap entitas mengingat waktu bisnisnya, dan aksi pada waktu
+*t* hanya memilih entitas yang sudah ada sebelum *t*. Nasabah terdaftar dulu, rekening dibuka 1–20
+menit kemudian (dengan setoran awal), lalu transaksi, akad (diajukan → disetujui → cair → angsuran,
+tiap langkah sesudah langkah sebelumnya), checkout toko, dan perubahan profil (sesudah perubahan
+sebelumnya). Tiga puluh nasabah awal terdaftar sehari sebelum rentang backfill. Dalam 14 hari
+terakhir, setiap dua hari satu nasabah baru sengaja tidak pernah bertransaksi (selain 20% acak), bahan
+pertanyaan direksi no. 3. Catatan: `saldo_setelah` mengikuti urutan pemrosesan, bukan urutan
+`occurred_at`, karena aksi berjalan paralel.
 Mulai kecil: 30 hari × 200 aksi ≈ 6 ribu aksi ≈ 25 ribu pesan NATS ≈ beberapa MB bronze. 13 bulan ×
 500 aksi ≈ 200 ribu aksi; perhatikan retensi stream (BANK 7 hari/512 MB, CDC 7 hari/2 GiB) dan sisa disk.
 
@@ -206,12 +215,8 @@ docker compose -f compose.ops.yaml down -v   # hapus container + volume (Postgre
 docker builder prune -f
 ```
 
-## Hal yang perlu diputuskan (catatan penulis A)
+## Catatan
 
-- **REPLICA IDENTITY FULL** untuk `nasabah` (dan sebaiknya `rekening`, `akad_pembiayaan`) di database
-  `bank`, supaya `before` terisi pada update (demo SCD-2 lebih jelas). Ini perubahan di aplikasi Sister.
-- **occurred_at pada pembuatan nasabah/rekening/akad dan PATCH nasabah.** Saat ini hanya transaksi,
-  transfer, dan aksi akad yang menerima `occurred_at`; backfill membuat nasabah/rekening/akad dengan
-  waktu sekarang sehingga transaksi historis bisa lebih tua daripada nasabahnya.
-- Order toko tidak menerima `occurred_at`, jadi belanja selalu bertanggal hari ini (backfill dapat
-  mematikannya dengan `with_shop=false`).
+- Retensi stream membatasi backfill besar: BANK 7 hari/512 MB, SHOP 24 jam (milik Sister), CDC 7 hari/2 GiB.
+  Biarkan ingestor menyala selama backfill agar pesan sudah tertulis ke bronze sebelum terbuang.
+- Partisi `dt` memakai tanggal UTC (kontrak); "kemarin" versi WIB dihitung di silver.

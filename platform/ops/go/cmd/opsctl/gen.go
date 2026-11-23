@@ -52,9 +52,10 @@ type cabang struct {
 }
 
 type rekening struct {
-	ID    any
-	No    string
-	Saldo int64 // perkiraan lokal; aplikasi tetap sumber kebenaran
+	ID     any
+	No     string
+	Saldo  int64     // perkiraan lokal; aplikasi tetap sumber kebenaran
+	Opened time.Time // waktu bisnis pembukaan (dibuka_at)
 }
 
 type nasabah struct {
@@ -64,13 +65,17 @@ type nasabah struct {
 	Segmen  string
 	Cabang  int  // indeks ke g.cabang
 	Dormant bool // nasabah baru yang sengaja tidak bertransaksi (pertanyaan direksi no. 3)
-	Rek     []*rekening
+	// Created dan LastProfil: waktu bisnis pendaftaran dan perubahan profil terakhir
+	Created    time.Time
+	LastProfil time.Time
+	Rek        []*rekening
 }
 
 type akad struct {
 	ID      any
 	Status  string
 	Nasabah *nasabah
+	At      time.Time // waktu bisnis langkah terakhir (diajukan/disetujui/cair/angsuran)
 }
 
 type product struct {
@@ -349,7 +354,8 @@ func (g *generator) bootstrap(ctx context.Context) error {
 	var nasRaw any
 	if err := g.gw.call(ctx, http.MethodGet, pathNasabah+"?limit=500", nil, "", &nasRaw); err == nil {
 		for _, m := range asList(nasRaw, "nasabah") {
-			n := &nasabah{ID: m["id"], CIF: str(m["cif"]), Kota: str(m["kota"]), Segmen: str(m["segmen"]), Cabang: cabIdx[str(m["cabang_id"])]}
+			n := &nasabah{ID: m["id"], CIF: str(m["cif"]), Kota: str(m["kota"]), Segmen: str(m["segmen"]), Cabang: cabIdx[str(m["cabang_id"])],
+				Created: parseT(m["created_at"]), LastProfil: parseT(m["updated_at"])}
 			byID[str(n.ID)] = n
 			nas = append(nas, n)
 		}
@@ -358,7 +364,7 @@ func (g *generator) bootstrap(ctx context.Context) error {
 	if err := g.gw.call(ctx, http.MethodGet, pathRekening+"?limit=500", nil, "", &rekRaw); err == nil {
 		for _, m := range asList(rekRaw, "rekening") {
 			if n := byID[str(m["nasabah_id"])]; n != nil && str(m["status"]) == "aktif" {
-				n.Rek = append(n.Rek, &rekening{ID: m["id"], No: str(m["no_rekening"]), Saldo: num(m["saldo"])})
+				n.Rek = append(n.Rek, &rekening{ID: m["id"], No: str(m["no_rekening"]), Saldo: num(m["saldo"]), Opened: parseT(m["dibuka_at"])})
 			}
 		}
 	}
@@ -367,7 +373,11 @@ func (g *generator) bootstrap(ctx context.Context) error {
 	if err := g.gw.call(ctx, http.MethodGet, pathAkad+"?limit=500", nil, "", &akRaw); err == nil {
 		for _, m := range asList(akRaw, "akad") {
 			if n := byID[str(m["nasabah_id"])]; n != nil {
-				aks = append(aks, &akad{ID: m["id"], Status: str(m["status"]), Nasabah: n})
+				at := parseT(m["updated_at"])
+				if at.IsZero() {
+					at = parseT(m["diajukan_at"])
+				}
+				aks = append(aks, &akad{ID: m["id"], Status: str(m["status"]), Nasabah: n, At: at})
 			}
 		}
 	}
@@ -379,29 +389,61 @@ func (g *generator) bootstrap(ctx context.Context) error {
 }
 
 // ---------------------------------------------------------------- aksi
+//
+// Urutan waktu: setiap entitas mengingat kapan ia ada (nasabah.Created, rekening.Opened,
+// akad.At, nasabah.LastProfil). Aksi pada waktu t hanya memilih entitas yang sudah ada sebelum t,
+// sehingga riwayat backfill konsisten: nasabah -> rekening -> transaksi/akad -> perubahan profil.
 
 // opts membawa konteks waktu satu aksi: live (sekarang) atau backfill (hari tertentu).
 type opts struct {
-	day      time.Time // nol = live
-	cabSpike int       // -1 = tidak ada
+	day          time.Time // nol = live
+	cabSpike     int       // -1 = tidak ada
+	forceDormant bool      // nasabah baru dipaksa tidak bertransaksi (bahan pertanyaan direksi no. 3)
 }
 
-func (g *generator) occurred(o opts, allowLate bool) (string, bool) {
-	var t time.Time
+// when: waktu kejadian aksi (live: sekarang; backfill: acak dalam hari mengikuti pola jam).
+func (g *generator) when(o opts) time.Time {
 	if o.day.IsZero() {
-		t = time.Now()
-	} else {
-		t = g.waktuDalamHari(o.day)
+		return time.Now()
 	}
-	late := false
-	g.mu.Lock()
-	p := g.cfg.Dirt.Terlambat
-	g.mu.Unlock()
-	if allowLate && g.f() < p {
-		t = t.Add(-time.Duration(1+g.intn(71)) * time.Hour) // perangkat offline, tersinkron belakangan
-		late = true
+	return g.waktuDalamHari(o.day)
+}
+
+// maybeLate memundurkan waktu 1-72 jam dengan peluang Dirt.Terlambat (perangkat offline,
+// tersinkron belakangan = data terlambat).
+func (g *generator) maybeLate(t time.Time, allow bool) (time.Time, bool) {
+	if allow && g.f() < g.dirt().Terlambat {
+		return t.Add(-time.Duration(1+g.intn(71)) * time.Hour), true
 	}
-	return t.In(wib).Format(time.RFC3339), late
+	return t, false
+}
+
+// later: waktu sesudah base (1..maxMin menit), tidak melewati sekarang.
+func (g *generator) later(base time.Time, maxMin int) time.Time {
+	t := base.Add(time.Duration(1+g.intn(maxMin)) * time.Minute)
+	if now := time.Now(); t.After(now) {
+		if base.After(now) {
+			return now
+		}
+		return base.Add(now.Sub(base) / 2)
+	}
+	return t
+}
+
+func rfc(t time.Time) string { return t.In(wib).Format(time.RFC3339) }
+
+func parseT(v any) time.Time {
+	t, err := time.Parse(time.RFC3339Nano, str(v))
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// occurred dipertahankan untuk kode lama dan uji: waktu aksi (+ kemungkinan terlambat) sebagai string.
+func (g *generator) occurred(o opts, allowLate bool) (string, bool) {
+	t, late := g.maybeLate(g.when(o), allowLate)
+	return rfc(t), late
 }
 
 func (g *generator) dirt() DirtConfig {
@@ -410,20 +452,46 @@ func (g *generator) dirt() DirtConfig {
 	return g.cfg.Dirt
 }
 
-func (g *generator) pickNasabah(active bool) *nasabah {
+// rekAt: rekening nasabah yang sudah dibuka sebelum t (panggil dengan g.mu terkunci).
+func rekAt(n *nasabah, t time.Time) []*rekening {
+	var out []*rekening
+	for _, r := range n.Rek {
+		if r.Opened.Before(t) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// pickNasabah memilih nasabah yang sudah terdaftar sebelum t. active=true: bukan dormant dan
+// punya rekening yang sudah dibuka sebelum t.
+func (g *generator) pickNasabah(active bool, t time.Time) *nasabah {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if len(g.nasabah) == 0 {
 		return nil
 	}
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 30; i++ {
 		n := g.nasabah[g.rng.IntN(len(g.nasabah))]
-		if active && (n.Dormant || len(n.Rek) == 0) {
+		if !n.Created.Before(t) {
+			continue
+		}
+		if active && (n.Dormant || len(rekAt(n, t)) == 0) {
 			continue
 		}
 		return n
 	}
 	return nil
+}
+
+func (g *generator) pickRek(n *nasabah, t time.Time) *rekening {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	rs := rekAt(n, t)
+	if len(rs) == 0 {
+		return nil
+	}
+	return rs[g.rng.IntN(len(rs))]
 }
 
 func (g *generator) cabangFor(n *nasabah, o opts) cabang {
@@ -438,18 +506,15 @@ func (g *generator) cabangFor(n *nasabah, o opts) cabang {
 	return g.cabang[g.rng.IntN(len(g.cabang))]
 }
 
+// nasabahBaru: daftar pada waktu t, lalu buka rekening beberapa menit kemudian (urutan waktu benar).
 func (g *generator) nasabahBaru(ctx context.Context, o opts) {
+	t := g.when(o)
 	g.mu.Lock()
-	cab := g.cabang[g.rng.IntN(len(g.cabang))]
-	ci := 0
-	for i := range g.cabang {
-		if str(g.cabang[i].ID) == str(cab.ID) {
-			ci = i
-		}
-	}
+	ci := g.rng.IntN(len(g.cabang))
+	cab := g.cabang[ci]
 	g.mu.Unlock()
 	body := g.profilBaru(cab)
-	body["occurred_at"], _ = g.occurred(o, false)
+	body["occurred_at"] = rfc(t)
 	if g.f() < math.Min(1, 3*g.dirt().Kosong) {
 		if g.f() < 0.5 {
 			body["email"] = ""
@@ -465,29 +530,31 @@ func (g *generator) nasabahBaru(ctx context.Context, o opts) {
 	}
 	m := asMap(res, "nasabah")
 	n := &nasabah{ID: m["id"], CIF: str(m["cif"]), Kota: str(body["kota"]), Segmen: str(body["segmen"]), Cabang: ci,
-		Dormant: g.f() < 0.2}
+		Dormant: o.forceDormant || g.f() < 0.2, Created: t, LastProfil: t}
 	g.count("nasabah baru")
-	// buka rekening tabungan dengan setoran awal (nasabah dormant: setoran kecil, lalu tidak aktif)
+	if n.Dormant {
+		g.count("nasabah baru tanpa transaksi (Q3)")
+	}
+	// buka rekening tabungan dengan setoran awal (dormant: setoran kecil, lalu tidak aktif)
 	setoran := g.lognormal(2_000_000, 0.8, 50_000)
 	if n.Dormant {
 		setoran = 100_000
 	}
-	g.bukaRekening(ctx, n, "tabungan_wadiah", setoran, cab, o)
+	g.bukaRekening(ctx, n, "tabungan_wadiah", setoran, cab, g.later(t, 20))
 	g.mu.Lock()
 	g.nasabah = append(g.nasabah, n)
 	g.mu.Unlock()
 }
 
-func (g *generator) bukaRekening(ctx context.Context, n *nasabah, jenis string, setoran int64, cab cabang, o opts) *rekening {
-	occ, _ := g.occurred(o, false)
+func (g *generator) bukaRekening(ctx context.Context, n *nasabah, jenis string, setoran int64, cab cabang, t time.Time) *rekening {
 	var res map[string]any
-	body := map[string]any{"nasabah_id": n.ID, "jenis": jenis, "setoran_awal": setoran, "cabang_id": cab.ID, "kanal": "teller", "occurred_at": occ}
+	body := map[string]any{"nasabah_id": n.ID, "jenis": jenis, "setoran_awal": setoran, "cabang_id": cab.ID, "kanal": "teller", "occurred_at": rfc(t)}
 	if err := g.gw.call(ctx, http.MethodPost, pathRekening, body, "", &res); err != nil {
 		g.fail("buka rekening", err)
 		return nil
 	}
 	m := asMap(res, "rekening")
-	r := &rekening{ID: m["id"], No: str(m["no_rekening"]), Saldo: setoran}
+	r := &rekening{ID: m["id"], No: str(m["no_rekening"]), Saldo: setoran, Opened: t}
 	g.mu.Lock()
 	n.Rek = append(n.Rek, r)
 	g.mu.Unlock()
@@ -495,13 +562,12 @@ func (g *generator) bukaRekening(ctx context.Context, n *nasabah, jenis string, 
 	return r
 }
 
-// transaksi mengirim satu transaksi. allowDirt=false untuk transaksi pendukung (setoran awal).
-func (g *generator) transaksi(ctx context.Context, n *nasabah, r *rekening, jenis string, nominal int64, kanal string, cab cabang, o opts, allowDirt bool) {
-	occ, late := g.occurred(o, allowDirt)
+// transaksi mengirim satu setor/tarik pada waktu t (late = t sudah dimundurkan sebagai data terlambat).
+func (g *generator) transaksi(ctx context.Context, r *rekening, jenis string, nominal int64, kanal string, cab cabang, t time.Time, late bool) {
 	body := map[string]any{"rekening_id": r.ID, "no_rekening": r.No, "cabang_id": cab.ID, "kanal": kanal,
-		"jenis": jenis, "nominal": nominal, "occurred_at": occ}
+		"jenis": jenis, "nominal": nominal, "occurred_at": rfc(t)}
 	d := g.dirt()
-	if allowDirt && g.f() < d.Kosong {
+	if g.f() < d.Kosong {
 		// cabang_id dikirim kosong (transaksi mobile tanpa cabang). Aplikasi mengisinya dengan cabang
 		// pembuka rekening, jadi kolom di OLTP tidak null; nilai kosong yang sampai ke bronze berasal
 		// dari email/no_hp nasabah. kanal NOT NULL di aplikasi sehingga tidak dikosongkan.
@@ -511,7 +577,7 @@ func (g *generator) transaksi(ctx context.Context, n *nasabah, r *rekening, jeni
 	if late {
 		g.count("kotor: data terlambat")
 	}
-	dup := allowDirt && g.f() < d.Duplikat
+	dup := g.f() < d.Duplikat
 	key := ""
 	if !dup {
 		key = fmt.Sprintf("gen-%d-%s", g.seq.Add(1), newID()[:8]) // request normal membawa Idempotency-Key
@@ -543,13 +609,17 @@ func (g *generator) adjustSaldo(r *rekening, jenis string, nominal int64) {
 }
 
 func (g *generator) transaksiAcak(ctx context.Context, o opts) {
-	n := g.pickNasabah(true)
+	t, late := g.maybeLate(g.when(o), true)
+	n := g.pickNasabah(true, t)
 	if n == nil {
 		g.nasabahBaru(ctx, o)
 		return
 	}
+	r := g.pickRek(n, t)
+	if r == nil {
+		return
+	}
 	g.mu.Lock()
-	r := n.Rek[g.rng.IntN(len(n.Rek))]
 	saldo := r.Saldo
 	g.mu.Unlock()
 	cab := g.cabangFor(n, o)
@@ -560,28 +630,28 @@ func (g *generator) transaksiAcak(ctx context.Context, o opts) {
 	}
 	switch jenis {
 	case "setor":
-		g.transaksi(ctx, n, r, "setor", g.lognormal(750_000, 0.9, 10_000), kanal, cab, o, true)
+		g.transaksi(ctx, r, "setor", g.lognormal(750_000, 0.9, 10_000), kanal, cab, t, late)
 	case "tarik":
 		round := int64(10_000)
 		if kanal == "atm" {
 			round = 50_000
 		}
 		nom := min(g.lognormal(400_000, 0.7, round), max(saldo/2, round))
-		g.transaksi(ctx, n, r, "tarik", nom, kanal, cab, o, true)
+		g.transaksi(ctx, r, "tarik", nom, kanal, cab, t, late)
 	case "transfer":
-		dst := g.pickNasabah(true)
+		dst := g.pickNasabah(true, t)
 		if dst == nil || dst == n {
 			return
 		}
-		g.mu.Lock()
-		dr := dst.Rek[0]
-		g.mu.Unlock()
+		dr := g.pickRek(dst, t)
+		if dr == nil {
+			return
+		}
 		nom := min(g.lognormal(500_000, 1.0, 1_000), max(saldo/2, 1_000))
-		occ, late := g.occurred(o, true)
 		if late {
 			g.count("kotor: data terlambat")
 		}
-		body := map[string]any{"dari": r.No, "ke": dr.No, "nominal": nom, "kanal": kanal, "cabang_id": cab.ID, "occurred_at": occ}
+		body := map[string]any{"dari": r.No, "ke": dr.No, "nominal": nom, "kanal": kanal, "cabang_id": cab.ID, "occurred_at": rfc(t)}
 		if err := g.gw.call(ctx, http.MethodPost, pathTransfer, body, "gen-"+newID(), nil); err != nil {
 			g.fail("transfer", err)
 			return
@@ -592,8 +662,23 @@ func (g *generator) transaksiAcak(ctx context.Context, o opts) {
 	}
 }
 
+// ubahProfil: perubahan kota/segmen/no_hp pada waktu t, hanya untuk nasabah yang terdaftar dan
+// perubahan terakhirnya sebelum t (riwayat SCD-2 berurutan).
 func (g *generator) ubahProfil(ctx context.Context, o opts) {
-	n := g.pickNasabah(false)
+	t := g.when(o)
+	var n *nasabah
+	for i := 0; i < 10 && n == nil; i++ {
+		c := g.pickNasabah(false, t)
+		if c == nil {
+			return
+		}
+		g.mu.Lock()
+		ok := c.LastProfil.Before(t.Add(-time.Minute))
+		g.mu.Unlock()
+		if ok {
+			n = c
+		}
+	}
 	if n == nil {
 		return
 	}
@@ -607,7 +692,7 @@ func (g *generator) ubahProfil(ctx context.Context, o opts) {
 		body["kota"] = kotaPindah[g.intn(len(kotaPindah))]
 		body["no_hp"] = "08" + g.digits(10)
 	}
-	body["occurred_at"], _ = g.occurred(o, false)
+	body["occurred_at"] = rfc(t)
 	if err := g.gw.call(ctx, http.MethodPatch, fmt.Sprintf("%s/%s", pathNasabah, str(n.ID)), body, "", nil); err != nil {
 		g.fail("ubah profil", err)
 		return
@@ -616,13 +701,19 @@ func (g *generator) ubahProfil(ctx context.Context, o opts) {
 	if k, ok := body["kota"].(string); ok {
 		n.Kota = k
 	}
+	n.LastProfil = t
 	g.mu.Unlock()
 	g.count("ubah profil (SCD-2)")
 }
 
 func (g *generator) ajukanAkad(ctx context.Context, o opts) {
-	n := g.pickNasabah(true)
+	t := g.when(o)
+	n := g.pickNasabah(true, t)
 	if n == nil {
+		return
+	}
+	r := g.pickRek(n, t)
+	if r == nil {
 		return
 	}
 	kode := kodeAkadValid[g.intn(len(kodeAkadValid))]
@@ -633,29 +724,28 @@ func (g *generator) ajukanAkad(ctx context.Context, o opts) {
 	pokok := g.lognormal(25_000_000, 0.9, 1_000_000)
 	tenor := []int{6, 12, 12, 24, 36, 60}[g.intn(6)]
 	margin := pokok * int64(tenor) / 12 * int64(8+g.intn(6)) / 100
-	occ, _ := g.occurred(o, false)
 	var res map[string]any
-	g.mu.Lock()
-	rekID := n.Rek[0].ID
-	g.mu.Unlock()
-	body := map[string]any{"nasabah_id": n.ID, "rekening_id": rekID, "kode_akad": kode, "pokok": pokok, "margin": margin, "tenor_bulan": tenor, "occurred_at": occ}
+	body := map[string]any{"nasabah_id": n.ID, "rekening_id": r.ID, "kode_akad": kode, "pokok": pokok, "margin": margin,
+		"tenor_bulan": tenor, "occurred_at": rfc(t)}
 	if err := g.gw.call(ctx, http.MethodPost, pathAkad, body, "", &res); err != nil {
 		g.fail("ajukan akad", err)
 		return
 	}
 	m := asMap(res, "akad")
 	g.mu.Lock()
-	g.akad = append(g.akad, &akad{ID: m["id"], Status: "diajukan", Nasabah: n})
+	g.akad = append(g.akad, &akad{ID: m["id"], Status: "diajukan", Nasabah: n, At: t})
 	g.mu.Unlock()
 	g.count("ajukan akad")
 }
 
-// prosesAkad memajukan satu akad: diajukan -> disetujui/ditolak, disetujui -> cair, cair -> angsuran.
+// prosesAkad memajukan satu akad yang langkah terakhirnya sebelum t: diajukan -> disetujui/ditolak,
+// disetujui -> cair, cair -> angsuran.
 func (g *generator) prosesAkad(ctx context.Context, o opts) {
+	t := g.when(o)
 	g.mu.Lock()
 	var cand []*akad
 	for _, a := range g.akad {
-		if a.Status == "diajukan" || a.Status == "disetujui" || a.Status == "cair" {
+		if (a.Status == "diajukan" || a.Status == "disetujui" || a.Status == "cair") && a.At.Before(t.Add(-time.Minute)) {
 			cand = append(cand, a)
 		}
 	}
@@ -677,10 +767,9 @@ func (g *generator) prosesAkad(ctx context.Context, o opts) {
 	case "cair":
 		aksi, next = "angsuran", "cair"
 	}
-	occ, _ := g.occurred(o, false)
 	var res map[string]any
 	cab := g.cabangFor(a.Nasabah, o)
-	body := map[string]any{"occurred_at": occ, "kanal": "teller", "cabang_id": cab.ID}
+	body := map[string]any{"occurred_at": rfc(t), "kanal": "teller", "cabang_id": cab.ID}
 	if aksi == "angsuran" {
 		body["kanal"] = g.weighted(map[string]float64{"mobile": 0.6, "teller": 0.2, "web": 0.2})
 	}
@@ -698,18 +787,24 @@ func (g *generator) prosesAkad(ctx context.Context, o opts) {
 		next = str(m["status"])
 	}
 	g.mu.Lock()
-	a.Status = next
+	a.Status, a.At = next, t
 	g.mu.Unlock()
 	g.count("akad " + aksi)
 }
 
-// belanja: checkout toko dibayar dari rekening bank (payment service memanggil bank).
+// belanja: checkout toko pada waktu t, dibayar dari rekening bank (payment memanggil bank;
+// transaksi bayar_belanja ikut tanggal checkout).
 func (g *generator) belanja(ctx context.Context, o opts) {
-	n := g.pickNasabah(true)
+	t := g.when(o)
+	n := g.pickNasabah(true, t)
 	g.mu.Lock()
 	np := len(g.products)
 	g.mu.Unlock()
 	if n == nil || np == 0 {
+		return
+	}
+	r := g.pickRek(n, t)
+	if r == nil {
 		return
 	}
 	items := []map[string]any{}
@@ -719,10 +814,7 @@ func (g *generator) belanja(ctx context.Context, o opts) {
 		g.mu.Unlock()
 		items = append(items, map[string]any{"product_id": p.ID, "qty": 1 + g.intn(2)})
 	}
-	g.mu.Lock()
-	r := n.Rek[0]
-	g.mu.Unlock()
-	body := map[string]any{"customer": n.CIF, "items": items, "no_rekening": r.No}
+	body := map[string]any{"customer": n.CIF, "items": items, "no_rekening": r.No, "occurred_at": rfc(t)}
 	dup := g.f() < g.dirt().Duplikat
 	key := ""
 	if !dup {
@@ -802,6 +894,17 @@ func (g *generator) spikeIndex() int {
 }
 
 // ensureSeed memastikan ada cukup nasabah aktif sebelum lalu lintas dimulai.
+// newNasabahJob mendaftarkan nasabah baru langsung (bukan lewat antrean worker) agar nasabah hari
+// itu sudah ada sebelum aksi lain pada hari yang sama dijadwalkan.
+func (g *generator) newNasabahJob(ctx context.Context, o opts) { g.nasabahBaru(ctx, o) }
+
+// ensureSeedAt: seperti ensureSeed, tetapi selalu membuat n nasabah baru pada hari o.day.
+func (g *generator) ensureSeedAt(ctx context.Context, o opts, n int) {
+	for i := 0; i < n && ctx.Err() == nil; i++ {
+		g.nasabahBaru(ctx, o)
+	}
+}
+
 func (g *generator) ensureSeed(ctx context.Context, o opts, n int) {
 	g.mu.Lock()
 	have := len(g.nasabah)
@@ -850,7 +953,8 @@ func (g *generator) runLive(ctx context.Context) {
 func (g *generator) runBackfill(ctx context.Context, days, perDay int, withShop bool) {
 	today := time.Now().In(wib)
 	start := today.AddDate(0, 0, -days)
-	g.ensureSeed(ctx, opts{day: start, cabSpike: -1}, 30)
+	// nasabah awal terdaftar sehari sebelum rentang backfill agar hari pertama sudah punya nasabah aktif
+	g.ensureSeedAt(ctx, opts{day: start.AddDate(0, 0, -1), cabSpike: -1}, 30)
 	g.mu.Lock()
 	ncab := len(g.cabang)
 	workers := max(1, min(g.cfg.Workers*2, 16))
@@ -897,9 +1001,10 @@ func (g *generator) runBackfill(ctx context.Context, days, perDay int, withShop 
 			mul *= 1.3
 		}
 		n = int(float64(n) * mul)
-		// pertambahan nasabah baru per hari agar "nasabah baru belum bertransaksi" bermakna
+		// pertambahan nasabah baru per hari. Dalam 14 hari terakhir, setiap dua hari satu nasabah
+		// baru dipaksa tidak pernah bertransaksi (bahan pertanyaan direksi no. 3), selain 20% acak.
 		for i := 0; i < max(1, perDay/40) && ctx.Err() == nil; i++ {
-			jobs <- job{opts{day: day, cabSpike: -1}}
+			g.newNasabahJob(ctx, opts{day: day, cabSpike: -1, forceDormant: i == 0 && d <= 14 && d%2 == 1})
 		}
 		for i := 0; i < n && ctx.Err() == nil; i++ {
 			jobs <- job{opts{day: day, cabSpike: sp}}

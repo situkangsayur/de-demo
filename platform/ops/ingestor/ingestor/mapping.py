@@ -25,13 +25,13 @@ SHOP_ENTITY = {"order": "orders", "payment": "payment", "inventory": "inventory"
 CDC_BIZ_TIME = {
     "transaksi": ["occurred_at"],
     "nasabah": ["updated_at", "created_at"],
-    "rekening": ["updated_at"],  # perubahan saldo: tidak ada kolom waktu -> ts_ms
+    # rekening.updated_at = waktu proses (bukan waktu bisnis); kontrak: partisi pakai dibuka_at
+    "rekening": ["dibuka_at"],
     "akad_pembiayaan": ["updated_at"],
     "orders": ["updated_at", "created_at"],
     "order_history": ["at"],
 }
 CDC_CREATE_TIME = {
-    "rekening": ["dibuka_at"],
     "akad_pembiayaan": ["created_at", "diajukan_at"],
 }
 DEFAULT_BIZ_TIME = ["occurred_at", "updated_at", "created_at"]
@@ -217,6 +217,14 @@ def map_cdc(subject: str, payload: Any, msg_time: datetime) -> list[Row]:
         lsn = f"ts{ts_ms}"
     event_id = f"{table}:{lsn}:{_pk(row)}"
     rec = _meta("cdc", event_id, f"{table}.{op}", biz, int(ts_ms), op)
+    # Kolom tambahan (di luar 8 kolom kontrak): nilai lama baris sebagai JSON string untuk op u/d
+    # (terisi bila tabel memakai REPLICA IDENTITY FULL), null untuk c/r. Bahan SCD-2/audit di silver.
+    before = payload.get("before")
+    rec["_before"] = (
+        json.dumps(before, ensure_ascii=False, separators=(",", ":"), default=str)
+        if op in ("u", "d") and isinstance(before, dict)
+        else None
+    )
     rec.update(flatten(row))
     return [Row("cdc", table, biz.astimezone(timezone.utc).strftime("%Y-%m-%d"), rec)]
 

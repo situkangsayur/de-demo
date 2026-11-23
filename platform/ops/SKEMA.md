@@ -47,13 +47,15 @@ Contoh `bank.transaksi.dibuat`:
 Contoh `cdc.bank.rekening` (UPDATE saldo):
 
 ```json
-{"before":null,"after":{"id":"5d1e…","no_rekening":"1100042","saldo":1650000,"...":"..."},
+{"before":{"id":"5d1e…","no_rekening":"1100042","saldo":2000000,"...":"..."},
+ "after":{"id":"5d1e…","no_rekening":"1100042","saldo":1650000,"...":"..."},
  "source":{"connector":"postgresql","db":"bank","schema":"public","table":"rekening","lsn":26843312,"txId":812},
  "op":"u","ts_ms":1795748049123}
 ```
 
-`before` bernilai `null` pada update/delete selama tabel memakai `REPLICA IDENTITY DEFAULT` (bawaan
-Postgres: hanya primary key yang dikirim). Lihat "Hal yang perlu diputuskan" di README-OPS.
+`nasabah`, `rekening`, `akad_pembiayaan`, dan `orders` memakai `REPLICA IDENTITY FULL`, sehingga update dan
+delete membawa `before` lengkap. Tabel lain (`transaksi`, `cabang`, `order_history`) memakai bawaan Postgres:
+`before` null pada update (tabel itu praktis hanya di-INSERT).
 
 ## 3. Bronze (RustFS, bucket `lake`)
 
@@ -72,6 +74,12 @@ Path: `s3://lake/bronze/<sumber>/<entitas>/dt=YYYY-MM-DD/part-<batch_id>.parquet
 | `_occurred_at` | string RFC3339 UTC | app: `occurred_at` envelope (SHOP: waktu publish); cdc: kolom waktu bisnis (lihat tabel di bawah), bila tidak ada `ts_ms` |
 | `_ts_ms` | int64 | app: waktu pesan di stream (ms); cdc: `ts_ms` envelope Debezium (waktu Debezium memproses perubahan) |
 | `_op` | string | cdc: `c` insert, `u` update, `d` delete, `r` snapshot awal; app: null |
+
+Kolom tambahan khusus cdc (di luar kontrak, ditempatkan sebagai kolom data pertama):
+
+| Kolom | Tipe | Isi |
+|---|---|---|
+| `_before` | string (JSON) | baris lama dari envelope (`before`) untuk `op` `u`/`d`; null untuk `c`/`r` atau bila tabel tidak `REPLICA IDENTITY FULL`. Bahan audit dan SCD-2 (mis. `json_extract_string(_before, '$.kota')` di DuckDB) |
 
 ### Kolom data
 
@@ -92,7 +100,7 @@ disimpan sebagai JSON string (`items`). Casting ke tipe yang benar dilakukan di 
 | `app/product` | snapshot harian katalog (`_event_type=product.snapshot`) | tanggal snapshot |
 | `cdc/transaksi` | `cdc.bank.transaksi` | `occurred_at` |
 | `cdc/nasabah` | `cdc.bank.nasabah` | `updated_at`, lalu `created_at` |
-| `cdc/rekening` | `cdc.bank.rekening` | `updated_at` (insert/snapshot: juga `dibuka_at`) |
+| `cdc/rekening` | `cdc.bank.rekening` | `dibuka_at` (`updated_at` rekening = waktu proses, bukan waktu bisnis) |
 | `cdc/akad_pembiayaan` | `cdc.bank.akad_pembiayaan` | `cair_at` bila status cair/lunas, lalu `updated_at`, `diajukan_at` |
 | `cdc/cabang` | `cdc.bank.cabang` | `ts_ms` (tidak ada kolom waktu) |
 | `cdc/orders`, `cdc/order_history` | `cdc.orders.*` | `updated_at`/`created_at`; `at` |
