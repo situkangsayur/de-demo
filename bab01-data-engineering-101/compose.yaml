@@ -1,0 +1,32 @@
+# Lab Bab 1: siklus hidup data (P01). Berjalan sendiri tanpa platform; opsional membaca statistik platform.
+name: de-bab01
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  api:
+    build: ./api
+    image: de-bab01-api:1.0
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 128m
+    environment:
+      FLUSH_DETIK: ${FLUSH_DETIK:-5}
+      BATCH_DETIK: ${BATCH_DETIK:-15}
+      PLATFORM_FLOW_URL: ${PLATFORM_FLOW_URL:-}
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports: ["${BIND_ADDR:-127.0.0.1}:52101:8080"]
+
+  ui:
+    build: ./ui
+    image: de-bab01-ui:1.0
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 256m
+    environment:
+      API_URL: http://api:8080
+    depends_on:
+      api: { condition: service_healthy }
+    ports: ["${BIND_ADDR:-127.0.0.1}:52100:3000"]

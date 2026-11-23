@@ -1,0 +1,7 @@
+# Isi berkas ini sama persis di bab02/api dan bab03/api agar layer pip dipakai bersama.
+duckdb==2.0.0
+pyarrow==26.0.0
+fastavro==1.12.1
+boto3==1.44.9
+fastapi==0.162.7
+uvicorn==0.52.4

@@ -1,0 +1,39 @@
+# Lab Bab 2: pemodelan data dan format file (P02). Berjalan sendiri; opsional membaca bronze platform.
+name: de-bab02
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  api:
+    build: ./api
+    image: de-bab02-api:1.0
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 1536m
+    environment:
+      N_TRANSAKSI: ${N_TRANSAKSI:-300000}
+      DATA_DIR: /data
+      PLATFORM_S3_ENDPOINT: ${PLATFORM_S3_ENDPOINT:-}
+      PLATFORM_S3_ACCESS_KEY: ${PLATFORM_S3_ACCESS_KEY:-}
+      PLATFORM_S3_SECRET_KEY: ${PLATFORM_S3_SECRET_KEY:-}
+      PLATFORM_S3_BUCKET: ${PLATFORM_S3_BUCKET:-lake}
+    volumes:
+      - kerja:/data          # berkas hasil perbandingan format (dibuang saat down -v)
+    ports: ["${BIND_ADDR:-127.0.0.1}:52201:8080"]
+
+  ui:
+    build: ./ui
+    image: de-bab02-ui:1.0
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: 256m
+    environment:
+      API_URL: http://api:8080
+    depends_on:
+      api: { condition: service_healthy }
+    ports: ["${BIND_ADDR:-127.0.0.1}:52200:3000"]
+
+volumes:
+  kerja:
